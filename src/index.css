@@ -1,0 +1,38 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: "Inter", "Noto Sans TC", -apple-system, BlinkMacSystemFont,
+    "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  color: #0f172a;
+  background-color: #f8fafc;
+}
+
+/* Highlight risk markup (F-008) */
+.risk-yellow {
+  background: linear-gradient(transparent 60%, #fde68a 60%);
+  padding: 2px 0;
+}
+.risk-red {
+  background: linear-gradient(transparent 60%, #fca5a5 60%);
+  padding: 2px 0;
+  font-weight: 600;
+}
+
+/* Pretty scrollbar */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
