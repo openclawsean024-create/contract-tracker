@@ -58,7 +58,7 @@ export default function DashboardPage() {
   return (
     <div className="space-y-6">
       <header>
-        <h1 className="text-2xl md:text-3xl font-bold">風險儀表板</h1>
+        <h1 className="text-2xl md:text-3xl font-bold">儀表板</h1>
         <p className="text-sm text-slate-600 mt-1">
           合約總覽 · 風險分佈 · 即將到期提醒
         </p>
