@@ -1,31 +1,73 @@
-// IndexedDB layer via Dexie (F-007 storage)
-// Store contracts locally; 100% on-device per ADR-004
+// IndexedDB layer via Dexie (FR-020 storage)
+// 合約只存在本機瀏覽器（明文、未加密）；M1 不上雲。
 import Dexie, { type Table } from "dexie";
-import type { Contract, LegalDB, Template } from "../types";
+import type {
+  Contract,
+  LegalDB,
+  OutboxEmail,
+  TeamMember,
+  Template,
+} from "../types";
 
-class ContractDB extends Dexie {
+export const DB_NAME = "contract-tracker-db";
+export const V1_CONTRACT_STORES = "id, category, riskScore, expiresAt, createdAt";
+
+/** schema v2 新增欄位的預設值；不覆寫既有欄位，v1 資料不會遺失。 */
+export function withContractDefaults(c: Contract): Contract {
+  return {
+    ...c,
+    workflowStatus: c.workflowStatus ?? "draft",
+    notes: Array.isArray(c.notes) ? c.notes : [],
+    ownerId: c.ownerId ?? null,
+    reminderRecipientIds: Array.isArray(c.reminderRecipientIds)
+      ? c.reminderRecipientIds
+      : [],
+    riskNotes: Array.isArray(c.riskNotes) ? c.riskNotes : [],
+  };
+}
+
+export class ContractDB extends Dexie {
   contracts!: Table<Contract, string>;
+  teamMembers!: Table<TeamMember, string>;
+  outbox!: Table<OutboxEmail, string>;
 
-  constructor() {
-    super("contract-tracker-db");
+  constructor(name: string = DB_NAME) {
+    super(name);
     this.version(1).stores({
-      contracts: "id, category, riskScore, expiresAt, createdAt",
+      contracts: V1_CONTRACT_STORES,
     });
+    // v2（M1）：工作流狀態、註解、負責人／提醒收件人；新增團隊成員與 mock 寄件匣
+    this.version(2)
+      .stores({
+        contracts: `${V1_CONTRACT_STORES}, workflowStatus`,
+        teamMembers: "id, email",
+        outbox: "id, contractId, scheduledFor, createdAt",
+      })
+      .upgrade((tx) =>
+        tx
+          .table<Contract, string>("contracts")
+          .toCollection()
+          .modify((c) => {
+            Object.assign(c, withContractDefaults(c));
+          })
+      );
   }
 }
 
 export const db = new ContractDB();
 
 export async function listContracts(): Promise<Contract[]> {
-  return db.contracts.orderBy("createdAt").reverse().toArray();
+  const rows = await db.contracts.orderBy("createdAt").reverse().toArray();
+  return rows.map(withContractDefaults);
 }
 
 export async function getContract(id: string): Promise<Contract | undefined> {
-  return db.contracts.get(id);
+  const c = await db.contracts.get(id);
+  return c ? withContractDefaults(c) : undefined;
 }
 
 export async function saveContract(contract: Contract): Promise<void> {
-  await db.contracts.put(contract);
+  await db.contracts.put(withContractDefaults(contract));
 }
 
 export async function deleteContract(id: string): Promise<void> {
@@ -60,14 +102,14 @@ export async function importAll(json: string): Promise<number> {
   let count = 0;
   await db.transaction("rw", db.contracts, async () => {
     for (const c of parsed.contracts as Contract[]) {
-      await db.contracts.put(c);
+      await db.contracts.put(withContractDefaults(c));
       count++;
     }
   });
   return count;
 }
 
-// F-002: 100 條法條庫（pure JSON asset, fallback to public/data/legal-db.json)
+// 100 條法條庫（靜態 JSON asset，同 origin）
 let cachedLegalDb: LegalDB | null = null;
 export async function loadLegalDb(): Promise<LegalDB> {
   if (cachedLegalDb) return cachedLegalDb;
