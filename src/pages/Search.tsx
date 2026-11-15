@@ -1,12 +1,18 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Search as SearchIcon } from "lucide-react";
 import { useAppStore } from "../store";
-import { searchContracts } from "../lib/search";
+import { SEARCH_FIELD_LABELS, searchContracts, type SearchField } from "../lib/search";
 import { RiskBadge } from "./Dashboard";
 
 export default function SearchPage() {
   const contracts = useAppStore((s) => s.contracts);
+  const refresh = useAppStore((s) => s.refreshContracts);
+
+  // 進入搜尋頁時重新讀取本機資料，結果才會反映剛改過的標題或對方
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
   const [q, setQ] = useState("");
   const [results, setResults] = useState<
     Array<{
@@ -46,7 +52,7 @@ export default function SearchPage() {
       <header>
         <h1 className="text-2xl md:text-3xl font-bold">全文搜尋</h1>
         <p className="text-sm text-slate-600 mt-1">
-          以 FlexSearch + 中文 tokenizer 搜尋合約（F-007）
+          搜尋合約的標題、對方與內文（支援中文與英文關鍵字，全部在本機進行）
         </p>
       </header>
 
@@ -59,6 +65,8 @@ export default function SearchPage() {
             />
             <input
               type="search"
+              data-testid="search-input"
+              aria-label="搜尋關鍵字"
               placeholder="輸入關鍵字，如「個人資料」、「保密」、「違約金」"
               className="w-full pl-10 pr-3 py-2 rounded-lg border border-slate-300 outline-none focus:border-blue-500"
               value={q}
@@ -70,6 +78,7 @@ export default function SearchPage() {
           </div>
           <button
             onClick={() => void handleSearch()}
+            data-testid="search-submit"
             className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700"
           >
             搜尋
@@ -79,7 +88,7 @@ export default function SearchPage() {
 
       {searched && (
         <div className="space-y-3">
-          <div className="text-sm text-slate-600">
+          <div className="text-sm text-slate-600" data-testid="search-count">
             找到 {results.length} 份合約
           </div>
           {results.length === 0 && (
@@ -90,6 +99,7 @@ export default function SearchPage() {
           {results.map(({ contract, snippet, field }) => (
             <article
               key={contract.id}
+              data-testid="search-result"
               className="bg-white rounded-xl border border-slate-200 p-4"
             >
               <div className="flex flex-wrap items-center gap-2 mb-2">
@@ -104,7 +114,7 @@ export default function SearchPage() {
                   對方：{contract.counterparty}
                 </span>
                 <span className="text-xs text-slate-400">
-                  命中欄位：{field}
+                  命中欄位：{SEARCH_FIELD_LABELS[field as SearchField] ?? field}
                 </span>
               </div>
               <div className="text-sm text-slate-700">

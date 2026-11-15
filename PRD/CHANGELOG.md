@@ -16,6 +16,7 @@
 - 風險規則的法條對照不再用 `Math.random`，同一份輸入結果固定（AC-004）
 - 提醒依使用者設定的 `reminderDaysBefore` 觸發，不再寫死 7／30／60／90 天，且有去重（AC-006）
 - production build 中 FlexSearch 匯入錯誤造成建檔流程中斷
+- 全文搜尋對中文關鍵字查不到結果（FR-019；M1 驗收後依 Sean 指示追加）
 
 ### Added（併入 contract-reviewer，SPEC §12.1 M-01～M-08）
 

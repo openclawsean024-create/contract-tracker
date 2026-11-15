@@ -1,5 +1,4 @@
-// FlexSearch-based full-text search (F-007)
-// Pre-tokenize Chinese text for indexing
+// FlexSearch 全文搜尋（FR-019）：標題／對方／內文，中文以單字＋bigram 編碼
 import * as FlexSearchNS from "flexsearch";
 import type { Contract } from "../types";
 import { listContracts } from "./storage";
@@ -29,28 +28,27 @@ const FlexSearch: FlexSearchModule =
     ? flexSearchNamespace
     : (flexSearchNamespace.default as FlexSearchModule);
 
-// Simple Chinese-friendly splitter: split by character
-// (For production we'd use Intl.Segmenter or jieba; this keeps deps small)
-function tokenize(text: string): string {
-  if (!text) return "";
-  // Split into Unicode CJK chars (basic range) + latin words
-  const tokens: string[] = [];
-  const cjk = /[\u4e00-\u9fff]/g;
-  const latin = /[a-zA-Z0-9]+/g;
+const CJK_RUN = /[\u3400-\u9fff]+/g;
+const LATIN_WORD = /[a-z0-9]+/g;
 
-  // Push full text as one token for substring search
-  tokens.push(text);
-  // Push individual CJK chars
-  let m: RegExpExecArray | null;
-  while ((m = cjk.exec(text)) !== null) tokens.push(m[0]);
-  // Push latin words
-  while ((m = latin.exec(text)) !== null) tokens.push(m[0]);
-  // Push bigrams (more Chinese-friendly)
-  const cjkOnly = text.replace(/[^\u4e00-\u9fff]/g, "");
-  for (let i = 0; i < cjkOnly.length - 1; i++) {
-    tokens.push(cjkOnly.slice(i, i + 2));
+/**
+ * 中英文共用的編碼器（索引與查詢都用同一個）。
+ * FlexSearch 預設的編碼器會把 CJK 字元全部丟掉，所以中文關鍵字查不到任何結果。
+ * - 英數：轉小寫後以單字為單位（搭配 forward tokenizer 可做前綴比對）
+ * - 中文：每一段連續中文拆成「單字＋相鄰兩字（bigram）」
+ * 查詢的所有詞都必須命中（AND），因此「自動續約」需要 自動／動續／續約 都出現才算符合。
+ */
+export function encodeForSearch(text: string): string[] {
+  const lower = (text ?? "").toLowerCase();
+  const terms = new Set<string>();
+  for (const word of lower.match(LATIN_WORD) ?? []) terms.add(word);
+  for (const run of lower.match(CJK_RUN) ?? []) {
+    for (let i = 0; i < run.length; i++) {
+      terms.add(run[i]);
+      if (i < run.length - 1) terms.add(run.slice(i, i + 2));
+    }
   }
-  return tokens.join(" ");
+  return [...terms];
 }
 
 let docIndex: FlexSearchDocument<Contract> | null = null;
@@ -60,22 +58,10 @@ export function buildSearchIndex() {
   docIndex = new FlexSearch.Document<Contract>({
     document: {
       id: "id",
-      index: [
-        {
-          field: "title",
-          tokenize: "forward",
-        } as const,
-        {
-          field: "extractedText",
-          tokenize: "forward",
-        } as const,
-        {
-          field: "counterparty",
-          tokenize: "forward",
-        } as const,
-      ],
+      index: ["title", "extractedText", "counterparty"],
     },
-    tokenize: (text: string) => tokenize(text).split(" "),
+    tokenize: "forward",
+    encode: encodeForSearch,
   });
   indexed = false;
 }
@@ -96,19 +82,36 @@ export function invalidateIndex() {
   indexed = false;
 }
 
+export type SearchField = "title" | "extractedText" | "counterparty";
+
+export const SEARCH_FIELD_LABELS: Record<SearchField, string> = {
+  title: "標題",
+  extractedText: "內文",
+  counterparty: "對方",
+};
+
+const SEARCH_LIMIT = 100;
+
+/**
+ * 搜尋合約的標題、對方與內文。每次搜尋都從本機資料庫重建索引，
+ * 因此剛改過標題或剛刪除的合約不會出現過期的結果（本機資料量小，重建成本可忽略）。
+ * 同一份合約只回傳一次，field 為第一個命中的欄位（標題 → 內文 → 對方）。
+ */
 export async function searchContracts(
   query: string
 ): Promise<Array<{ id: string; field: string }>> {
-  if (!query.trim()) return [];
+  if (encodeForSearch(query).length === 0) return [];
+  buildSearchIndex();
   const idx = await ensureIndex();
-  // Use simple index search across all string fields
-  const results = idx.search(query, { limit: 20, suggest: true });
+  const results = idx.search(query, { limit: SEARCH_LIMIT });
   const matches: Array<{ id: string; field: string }> = [];
+  const seen = new Set<string>();
   for (const res of results) {
-    if (res.result) {
-      for (const id of res.result) {
-        matches.push({ id: String(id), field: res.field });
-      }
+    for (const rawId of res.result ?? []) {
+      const id = String(rawId);
+      if (seen.has(id)) continue;
+      seen.add(id);
+      matches.push({ id, field: res.field });
     }
   }
   return matches;

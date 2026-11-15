@@ -32,7 +32,7 @@ src/
     team.ts           # TeamAdapter、LocalTeamAdapter、負責人／收件人
     disclaimer.ts     # DISCLAIMER_TEXT 與首次使用確認
     storage.ts        # Dexie IndexedDB（schema v2）、JSON 匯出入
-    search.ts         # FlexSearch 全文搜尋（中文關鍵字目前查不到，見 STATUS.md）
+    search.ts         # FlexSearch 全文搜尋（中文以單字＋bigram 編碼）
   pages/              # Dashboard / Contracts / ContractDetail / Team / Outbox / LegalDb / Templates / Search
   test/               # setup.ts（fake-indexeddb）、factories.ts（假資料工廠）
 tests/
