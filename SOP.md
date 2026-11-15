@@ -24,7 +24,7 @@ npx playwright install chromium   # 第一次跑 E2E 前需要（CI 用 --with-d
 | Build | `npm run build`（`tsc -b && vite build`） | 可用 | exit 0；`dist/index.html` 含 `#root`，`dist/assets/` 有 React app bundle |
 | 開發伺服器 | `npm run dev`（http://localhost:5173） | 可用 | 首頁直接載入 React app |
 | 預覽 | `npm run preview`（port 4173） | 可用 | 提供 build 產物 |
-| E2E | `npm run e2e`（先 build，再以 Playwright 跑在本機 `vite preview` 127.0.0.1:4173） | 可用 | exit 0；12 個測試通過 |
+| E2E | `npm run e2e`（先 build，再以 Playwright 跑在本機 `vite preview` 127.0.0.1:4173） | 可用 | exit 0；13 個測試通過 |
 | ESLint | — | **尚未配置** | 沒有 eslint 設定與 script（`lint` 實際是 tsc） |
 | Format | — | **尚未配置** | 沒有 prettier 設定與 script |
 | Integration | — | **尚未配置** | — |

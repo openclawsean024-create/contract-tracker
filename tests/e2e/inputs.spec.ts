@@ -2,6 +2,7 @@
 import { test, expect, openApp, acknowledgeDisclaimer, gotoRoute } from "./fixtures";
 import { FAKE_RISKY_CONTRACT } from "../fixtures/fake-contracts";
 import { makeFakeDocx } from "../fixtures/fake-docx";
+import { makeFakePdf } from "../fixtures/fake-pdf";
 
 test("AC-002 上傳 .txt → 進入同一條分析流程並看到風險結果", async ({ page }) => {
   await openApp(page);
@@ -32,6 +33,29 @@ test("AC-002 上傳 .docx（測試內產生的假 docx）→ 看到風險結果"
   await expect(page.getByTestId("risk-list")).toContainText("自動續約");
   await page.getByText("完整擷取文字").click();
   await expect(page.getByTestId("extracted-text")).toContainText("範例科技股份有限公司");
+});
+
+test("AC-002 上傳 .pdf（測試內產生的假 PDF）→ 沿用 PDF 擷取並進入同一條分析流程", async ({ page }) => {
+  await openApp(page);
+  await acknowledgeDisclaimer(page);
+  await page.getByTestId("file-input").setInputFiles({
+    name: "fake-sample-agreement.pdf",
+    mimeType: "application/pdf",
+    buffer: makeFakePdf([
+      "FAKE SAMPLE AGREEMENT - TEST DATA ONLY",
+      "Sample Tech Co. and Test Vendor Ltd. agree to this NDA.",
+      "All confidential information shall be protected.",
+      "The breaching party shall pay liquidated damages.",
+    ]),
+  });
+  await expect(page.getByTestId("risk-section")).toBeVisible();
+  await expect(page.getByTestId("title-input")).toHaveValue("fake-sample-agreement");
+  await expect(page.getByTestId("detected-type")).toContainText("NDA");
+  await expect(page.getByTestId("category-select")).toHaveValue("nda");
+  await expect(page.getByTestId("risk-badge")).toHaveText("高風險");
+  await expect(page.getByTestId("risk-list")).toContainText("懲罰性違約金");
+  await page.getByText("完整擷取文字").click();
+  await expect(page.getByTestId("extracted-text")).toContainText("FAKE SAMPLE AGREEMENT");
 });
 
 test("AC-002 不支援的格式顯示錯誤並提示改用貼上文字", async ({ page }) => {
