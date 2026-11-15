@@ -5,6 +5,38 @@
 
 ---
 
+## M1 — 2026-11-16（feat/m1，待 Sean 覆審）
+
+依 `GOAL.md` 完成 AC-001～AC-010；驗證結果見 `STATUS.md`。
+
+### Fixed
+
+- `index.html` 改回 Vite entry，build 產物可實際開啟 React app；刪除與產品無關的 `dashboard.html`（AC-001）
+- CI 不再吞掉 test／lint 失敗，安裝改為嚴格 `npm ci`（AC-009）
+- 風險規則的法條對照不再用 `Math.random`，同一份輸入結果固定（AC-004）
+- 提醒依使用者設定的 `reminderDaysBefore` 觸發，不再寫死 7／30／60／90 天，且有去重（AC-006）
+- production build 中 FlexSearch 匯入錯誤造成建檔流程中斷
+
+### Added（併入 contract-reviewer，SPEC §12.1 M-01～M-08）
+
+- .txt／.docx 上傳與貼上內文（AC-002）、契約類型偵測（AC-003）
+- reviewer 的 13 條規則與風險分類；管轄／仲裁、不可抗力為資訊提示（AC-004）
+- 5 階段審核工作流、獨立註解、依狀態分組的儀表板；Dexie schema v2（AC-005）
+- reviewer 的測試情境改寫成 vitest
+
+### Added（新功能）
+
+- 到期提醒 mock 寄件匣（`EmailAdapter`／`MockEmailAdapter`）（AC-006）
+- 本機 mock 團隊共用（`TeamAdapter`／`LocalTeamAdapter`）（AC-007）
+- 免責聲明與首次使用確認（AC-008）
+- Playwright E2E、資料與憑證衛生測試（AC-009、AC-010）
+
+### 未搬（SPEC §12.2）
+
+reviewer 的 PDF 解析、localStorage 儲存層、createStore、範本 stub、1–10 數值分數、「AI」文案、dashboard.html、Layout／BrowserRouter／框架升級、流程文件與定價表。
+
+---
+
 ## v3.0.2 — 2026-09-06（fleet-upgrade）
 
 **升級者**：Sean 10-repo-fleet worker

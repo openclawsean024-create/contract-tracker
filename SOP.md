@@ -8,25 +8,27 @@
 
 ```bash
 npm ci --legacy-peer-deps
+npx playwright install chromium   # 第一次跑 E2E 前需要（CI 用 --with-deps）
 ```
 
 ## 驗證指令（依 `package.json` scripts 查證）
 
-| 類型 | 指令 | 狀態 | 2026-11-16 實測結果 |
+| 類型 | 指令 | 狀態 | 2026-11-16 實測結果（feat/m1） |
 |---|---|---|---|
 | 安裝 | `npm ci --legacy-peer-deps` | 可用 | exit 0 |
-| Lint／型別檢查 | `npm run lint`（實際是 `tsc --noEmit`） | 可用 | exit 0 |
-| 單元測試 | `npm test`（`vitest --run`） | 可用 | exit 0；3 個檔案、33 個測試通過（legalDb 14、pdfParser 11、reminder 8） |
+| Lint／型別檢查 | `npm run lint`（`tsc --noEmit && tsc --noEmit -p tsconfig.e2e.json`） | 可用 | exit 0 |
+| Typecheck | `npm run typecheck`（與 lint 相同） | 可用 | exit 0 |
+| 單元測試 | `npm test`（`vitest --run`，只收 `src/**/*.test.ts(x)`） | 可用 | exit 0；13 個檔案、170 個測試通過 |
 | 單一測試檔 | `npx vitest run src/lib/<name>.test.ts` | 可用 | — |
 | 監看測試 | `npm run test:watch` | 可用 | 未執行（互動式） |
-| Build | `npm run build`（`tsc -b && vite build`） | 可用，但**產物無效** | exit 0；只轉換 1 個模組，`dist/index.html` 是轉址頁，pdfjs／react chunk 為空；`dist/` 中沒有 `dashboard.html`，所以轉址目標不存在 |
-| 開發伺服器 | `npm run dev`（http://localhost:5173） | 可啟動，但**看不到產品** | 首頁會轉到靜態 mockup，React app 不會載入（原因見 SPEC §5 全域阻斷） |
-| 預覽 | `npm run preview`（port 4173） | 可啟動，但 build 產物無效 | — |
-| ESLint | — | **尚未配置** | 沒有 eslint 設定與 script |
+| Build | `npm run build`（`tsc -b && vite build`） | 可用 | exit 0；`dist/index.html` 含 `#root`，`dist/assets/` 有 React app bundle |
+| 開發伺服器 | `npm run dev`（http://localhost:5173） | 可用 | 首頁直接載入 React app |
+| 預覽 | `npm run preview`（port 4173） | 可用 | 提供 build 產物 |
+| E2E | `npm run e2e`（先 build，再以 Playwright 跑在本機 `vite preview` 127.0.0.1:4173） | 可用 | exit 0；12 個測試通過 |
+| ESLint | — | **尚未配置** | 沒有 eslint 設定與 script（`lint` 實際是 tsc） |
 | Format | — | **尚未配置** | 沒有 prettier 設定與 script |
-| E2E | `npm run e2e` | **尚未配置**（M1 AC-009 新增） | 不得視為通過 |
 | Integration | — | **尚未配置** | — |
-| 部署 | GitHub Actions `deploy` job | **失敗中** | repo 未啟用 Pages，`Setup Pages` 步驟失敗（run 34027979349）；agent 不得自行啟用 |
+| 部署 | GitHub Actions `deploy` job | **未啟用** | repo 未啟用 Pages，該 job 只在 push 到 `main` 時執行且會在 `Setup Pages` 失敗；agent 不得自行啟用或部署 |
 
 ## 提交前檢查
 
@@ -34,15 +36,24 @@ npm ci --legacy-peer-deps
 npm run lint
 npm test
 npm run build
+npm run e2e
 git diff --check
 ```
 
-M1 完成後再加上 `npm run e2e`，以及 `GOAL.md` 中每條 AC 列出的驗證指令。
+另外跑 `GOAL.md` 中每條 AC 列出的驗證指令，並把指令與 exit code 記錄到 `STATUS.md`。
 
-## CI 注意事項
+## CI
 
-- `.github/workflows/ci.yml` 的 test 步驟是 `npm test -- --run 2>&1 || echo "no test script"`，**測試失敗也不會讓 CI 失敗**；lint 步驟設為 `continue-on-error: true`。所以 CI 綠燈目前不能當作品質證據（M1 AC-009 修正）。
-- CI 的 build 步驟會成功，但產物裡沒有 app（見上表）。
+`.github/workflows/ci.yml`：`lint`、`test` → `build`（驗證 `dist` 內有 React app）與 `e2e`（Playwright）→ `deploy`（僅 `main` push）。
+任何一步失敗都會讓 CI 失敗：沒有 `|| echo`、沒有 `continue-on-error`，安裝使用嚴格的 `npm ci`。
+
+## 測試慣例
+
+- 單元測試放在 `src/**/*.test.ts`，E2E 放在 `tests/e2e/*.spec.ts`，假資料放在 `tests/fixtures/`。
+- 測試名稱以對應的 AC 編號開頭（例如 `AC-006 自訂天數命中…`）。
+- 只能用明顯的假資料；Email 只能用 `example.com`／`example.test`。
+- 日期一律注入（單元測試傳入固定的 `Date`；E2E 用 `page.clock.setFixedTime`），不依賴執行當天的日期。
+- 所有 E2E 透過 `tests/e2e/fixtures.ts` 攔截網路請求，出現非本機 origin 的請求即失敗。
 
 ## 開發流程
 

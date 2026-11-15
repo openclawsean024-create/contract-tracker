@@ -7,27 +7,38 @@
 - `openclawsean024-create/contract-reviewer` 是併入來源，**只讀**。要搬的內容見 SPEC §12，不得在該 repo 上 commit、開 PR、封存或改設定。
 - 本產品**不提供法律意見**。任何新的 UI 文案、提醒內容或文件都不得把規則比對稱為「AI 判斷」「法律意見」或「合規保證」。
 
-## 2. 專案結構（實際狀態，2026-11-16）
+## 2. 專案結構（實際狀態，2026-11-16，M1）
 
 ```
-index.html            # 目前是轉址到 dashboard.html 的 meta refresh（M1 AC-001 要修正）
-dashboard.html        # 與產品無關的靜態 mockup（假 KPI），不是產品功能
+index.html            # Vite entry（<div id="root"> + /src/main.tsx）
 public/data/
   legal-db.json       # 100 筆台灣法條摘要（未經律師覆核）
   templates.json      # 10 份合約範本
 src/
-  main.tsx, App.tsx   # HashRouter + 6 個路由
-  store.ts            # Zustand
-  types.ts            # Contract / ClauseRecord / RiskIssue / LegalArticle / Template
+  main.tsx, App.tsx   # HashRouter + 8 個路由
+  store.ts            # Zustand；teamAdapter（本機實作）在此建立
+  types.ts            # Contract / ClauseRecord / RiskIssue / TeamMember / OutboxEmail …
+  components/
+    Disclaimer.tsx    # 固定免責聲明
   lib/
-    pdfParser.ts      # PDF.js 擷取 + 8 類條款擷取（有測試）
-    legalDb.ts        # 風險規則引擎（有測試；法條對照目前用 Math.random）
-    reminder.ts       # 到期清單 + 瀏覽器通知（部分有測試）
-    storage.ts        # Dexie IndexedDB、JSON 匯出入
-    search.ts         # FlexSearch 全文搜尋
-  pages/              # Dashboard / Contracts / ContractDetail / LegalDb / Templates / Search
-  test/setup.ts       # 註冊 fake-indexeddb
-.github/workflows/ci.yml  # lint / test / build / deploy-to-pages
+    pdfParser.ts      # PDF.js 擷取 + 8 類條款擷取
+    textExtract.ts    # .txt／.docx（mammoth）／貼上內文 → 與 PDF 相同的結構
+    analyze.ts        # 四種輸入共用的分析流程（純函式）
+    contractType.ts   # 契約類型偵測 → ContractCategory
+    legalDb.ts        # 風險規則引擎（4 條條款層級 + 13 條全文層級；決定性）
+    workflow.ts       # 5 階段審核工作流、註解
+    reminderDispatch.ts # 提醒門檻、EmailAdapter、MockEmailAdapter、寄件匣
+    reminder.ts       # 到期清單、瀏覽器通知、排程
+    team.ts           # TeamAdapter、LocalTeamAdapter、負責人／收件人
+    disclaimer.ts     # DISCLAIMER_TEXT 與首次使用確認
+    storage.ts        # Dexie IndexedDB（schema v2）、JSON 匯出入
+    search.ts         # FlexSearch 全文搜尋（中文關鍵字目前查不到，見 STATUS.md）
+  pages/              # Dashboard / Contracts / ContractDetail / Team / Outbox / LegalDb / Templates / Search
+  test/               # setup.ts（fake-indexeddb）、factories.ts（假資料工廠）
+tests/
+  e2e/                # Playwright（跑在本機 vite preview）
+  fixtures/           # 假合約文字、假 docx 產生器
+.github/workflows/ci.yml  # lint / test / build / e2e / deploy-to-pages（deploy 未啟用）
 PRD/                  # SPEC.md、CHANGELOG.md
 ```
 
@@ -36,10 +47,9 @@ PRD/                  # SPEC.md、CHANGELOG.md
 - React 18.3 + TypeScript（strict）+ Vite 5 + Tailwind CSS 3
 - 路由：react-router-dom 6（HashRouter）；狀態：Zustand 4
 - 儲存：Dexie 4（IndexedDB，目前**未加密**）
-- 解析：pdfjs-dist 4；搜尋：FlexSearch 0.7；圖表：Recharts 2；日期：date-fns 4
-- 測試：Vitest 2（`environment: node`）+ fake-indexeddb
+- 解析：pdfjs-dist 4、mammoth 1（docx，lazy load）；搜尋：FlexSearch 0.7；圖表：Recharts 2；日期：date-fns 4
+- 測試：Vitest 2（`environment: node`）+ fake-indexeddb；E2E：Playwright
 - 套件管理：以 **npm + `package-lock.json`** 為準（CI 也用 npm）；repo 中的 `pnpm-lock.yaml`／`pnpm-workspace.yaml` 不是 canonical，其中 `allowBuilds` 是未填的佔位字串
-- M1 將新增（尚未存在）：mammoth（docx）、Playwright（E2E）
 
 ## 4. 開發規則
 
@@ -54,7 +64,7 @@ PRD/                  # SPEC.md、CHANGELOG.md
 
 ## 5. 驗證
 
-指令與現況見 [`SOP.md`](./SOP.md)。提交前至少要跑 `npm run lint`、`npm test`、`npm run build`，並記錄 exit code。
+指令與現況見 [`SOP.md`](./SOP.md)。提交前至少要跑 `npm run lint`、`npm test`、`npm run build`、`npm run e2e`，並記錄 exit code。
 
 ## 6. Commit 規則
 
