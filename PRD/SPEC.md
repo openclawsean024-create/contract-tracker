@@ -181,7 +181,7 @@
 | `web/src/lib/db.ts` 的 localStorage 儲存層、`createContract` 的 ID 產生方式 | T 使用 Dexie／IndexedDB，容量較大；R 的 `'CT' + Date.now() % 100000` 可能產生重複 ID |
 | `web/src/lib/createStore.ts` | T 已使用 Zustand |
 | R 的 10 個範本 stub | T 的 `templates.json` 已有 10 份完整範本；R 獨有的「顧問／軟體授權／競業／MOU」類別是否補成完整範本，列為 M2 待確認 |
-| 1–10 數值風險分數 | 與 T 的綠／黃／紅三級衝突；**待 Sean 決定**是否保留數值分數 |
+| 1–10 數值風險分數 | 已決定（2026-11-16，Sean）：風險只用綠／黃／紅三級，不搬數值分數 |
 | 「AI 摘要」「AI 解釋」文案 | 實際是規則比對，稱為 AI 會造成誤導，也有法律意見風險 |
 | `web/public/dashboard.html`、`web/index.html` | 與產品無關的靜態 mockup，以及損壞的入口 |
 | `Layout.tsx`、`BrowserRouter`、`base: '/contract-reviewer/'`、React 19／Tailwind v4／Vite 6 | T 有自己的版面與 HashRouter；不在 M1 升級框架版本 |

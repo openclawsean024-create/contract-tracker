@@ -23,7 +23,7 @@
   驗證：`npx vitest run src/lib/contractType.test.ts` 通過，至少包含 R 原有的 6 個情境（NDA、僱傭、租賃、採購、顧問、未知），斷言結果對應到 T 的 `ContractCategory`。
 
 - **AC-004：擴充風險規則並改為決定性輸出（併入 M-04、M-05）**（FR-005、FR-006）
-  R 的 13 條規則改寫進 `RISK_RULES`，每條規則都有 `suggestion` 與 `category`；管轄／仲裁、不可抗力改為資訊提示，不計入風險分數；移除 `Math.random()`，同一份輸入兩次評估的結果完全相同。
+  R 的 13 條規則改寫進 `RISK_RULES`，每條規則都有 `suggestion` 與 `category`；管轄／仲裁、不可抗力改為資訊提示，不計入風險分數；移除 `Math.random()`，同一份輸入兩次評估的結果完全相同。風險結果只呈現綠／黃／紅三級，不提供 1–10 數值分數（Sean 2026-11-16 決定）。
   驗證：`npx vitest run src/lib/legalDb.test.ts` 通過；每條新規則至少有一個命中案例和一個不命中案例；有一個測試對同一份輸入呼叫兩次 `evaluateRisk` 並斷言 `toEqual`；`git grep -n "Math.random" src/lib/legalDb.ts` 沒有結果。原有的 14 個測試斷言不得刪除或放寬。
 
 - **AC-005：審核工作流與註解（併入 M-06、M-07）**（FR-014、FR-015）
