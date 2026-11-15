@@ -3,6 +3,7 @@
 - 更新日期：2026-11-16
 - 狀態：🟢 **M1 開發完成，AC-001～AC-010 的驗證指令全數通過；待 Sean 覆審**（GOAL.md Exit gate：scope 與免責文案須由 Sean 覆審）。
 - 分支：`feat/m1`（從 `chore/prd-rebuild` 開出；PR #1 尚未合併）
+- PR：[openclawsean024-create/contract-tracker#2](https://github.com/openclawsean024-create/contract-tracker/pull/2)（Draft，base `main`）
 - 主 repo：`openclawsean024-create/contract-tracker`
 - 併入來源：`openclawsean024-create/contract-reviewer`（`main` HEAD `ef08fd8`，只讀；未在該 repo 做任何操作）
 - 未做的事：沒有 push 到 `main`、沒有合併 PR、沒有部署、沒有啟用 Pages、沒有封存 `contract-reviewer`、沒有接任何外部服務。
