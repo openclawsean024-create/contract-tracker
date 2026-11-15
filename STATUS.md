@@ -15,14 +15,14 @@
 | AC | 狀態 | Commit | 測試（名稱皆以 AC 編號開頭） | 驗證指令 | 結果（2026-11-16） |
 |---|---|---|---|---|---|
 | AC-001 入口載入 React SPA | ✅ | `9a412d9` | `src/entry.test.ts`（3）、`tests/e2e/entry.spec.ts`（2） | `npm run build && grep -q 'id="root"' dist/index.html && ls dist/assets/*.js && ! test -f dist/dashboard.html` | exit 0；`dist/assets/` 有 `index-*.js`、`react-*.js`、`pdfjs-*.js`、`mammoth.browser-*.js`；E2E 首頁看到「儀表板」標題 |
-| AC-002 多格式輸入 | ✅ | `427aebb`、`8c8df5e` | `src/lib/textExtract.test.ts`（10）、`src/lib/search.test.ts`（2）、`tests/e2e/inputs.spec.ts`（5：txt／docx／pdf／不支援格式／損壞檔）、主流程 E2E（貼上） | `npx vitest run src/lib/textExtract.test.ts` | exit 0，10／10；涵蓋 txt、假 docx、不支援格式、損壞檔、貼上、三種輸入結果一致 |
+| AC-002 多格式輸入 | ✅ | `427aebb`、`8c8df5e`、`e6aee3e` | `src/lib/textExtract.test.ts`（10）、`src/lib/search.test.ts`（2）、`tests/e2e/inputs.spec.ts`（5：txt／docx／pdf／不支援格式／損壞檔）、主流程 E2E（貼上） | `npx vitest run src/lib/textExtract.test.ts` | exit 0，10／10；涵蓋 txt、假 docx、不支援格式、損壞檔、貼上、三種輸入結果一致 |
 | AC-003 契約類型偵測 | ✅ | `427aebb`、`8c8df5e` | `src/lib/contractType.test.ts`（10）、`tests/e2e/inputs.spec.ts`（1） | `npx vitest run src/lib/contractType.test.ts` | exit 0，10／10；含 reviewer 原有 6 情境 |
 | AC-004 擴充規則＋決定性 | ✅ | `427aebb` | `src/lib/legalDb.test.ts`（59＝原有 14＋新增 45） | `npx vitest run src/lib/legalDb.test.ts`；`git grep -n "Math.random" src/lib/legalDb.ts` | exit 0，59／59；grep 無結果（exit 1）；原有 14 個測試未改動 |
 | AC-005 工作流與註解 | ✅ | `ea742e1`、`8c8df5e` | `src/lib/workflow.test.ts`（16）、`tests/e2e/workflow-team.spec.ts`（1） | `npx vitest run src/lib/workflow.test.ts` | exit 0，16／16；含 fake-indexeddb 的 v1 → v2 migration |
 | AC-006 到期提醒（mock 寄件匣） | ✅ | `4596a52`、`8c8df5e` | `src/lib/reminderDispatch.test.ts`（18，其中 2 個屬 AC-008）、`tests/e2e/m1-flow.spec.ts`（2） | `npx vitest run src/lib/reminderDispatch.test.ts` | exit 0，18／18；每個測試結束都斷言 `fetch` 呼叫次數為 0 |
 | AC-007 團隊共用（本機 mock） | ✅ | `4596a52`、`8c8df5e` | `src/lib/team.test.ts`（15）、`tests/e2e/workflow-team.spec.ts`（1） | `npx vitest run src/lib/team.test.ts` | exit 0，15／15 |
 | AC-008 免責聲明與文案 | ✅（文案待 Sean 定稿） | `4596a52`、`8c8df5e` | `src/lib/disclaimer.test.ts`（9）、`reminderDispatch.test.ts`（2）、主流程 E2E、`AC-008 免責確認狀態…` E2E | `git grep -nE "AI ?(摘要\|解釋\|分析\|審核)\|法律意見書" src/` | grep 無結果（exit 1）；E2E 在首頁、合約列表、合約詳情三頁斷言聲明可見，未勾選時上傳與分析按鈕皆 disabled |
-| AC-009 E2E 與品質閘門 | ✅ | `03e2dc0`、`04850bd`、PDF 上傳 E2E 見後續 commit | `src/ci.test.ts`（3）、`tests/e2e/*.spec.ts`（13） | `npm run lint`、`npm test`、`npm run build`、`npm run e2e`；`grep -n "\|\| echo\\\|continue-on-error" .github/workflows/ci.yml` | 四個指令皆 exit 0；grep 無結果（exit 1） |
+| AC-009 E2E 與品質閘門 | ✅ | `03e2dc0`、`04850bd`、`e6aee3e` | `src/ci.test.ts`（3）、`tests/e2e/*.spec.ts`（13） | `npm run lint`、`npm test`、`npm run build`、`npm run e2e`；`grep -n "\|\| echo\\\|continue-on-error" .github/workflows/ci.yml` | 四個指令皆 exit 0；grep 無結果（exit 1） |
 | AC-010 資料與憑證衛生 | ✅ | `04850bd` | `src/hygiene.test.ts`（6）、所有 E2E 的網路攔截 fixture | `git grep -nIE "(sk-[A-Za-z0-9]{20}\|ghp_[A-Za-z0-9]{20}\|AKIA[0-9A-Z]{16}\|BEGIN [A-Z ]*PRIVATE KEY)"`；`git grep -nE "@[A-Za-z0-9.-]+\.[a-z]{2,}" -- src tests` | 第一個 grep 無結果（exit 1）；第二個 grep 的 36 筆全部是 `example.com`／`example.test`；E2E 攔截到的請求全部是 `http://127.0.0.1:4173` |
 
 ## 品質閘門輸出摘要（2026-11-16，全新 `npm ci` 後執行）
