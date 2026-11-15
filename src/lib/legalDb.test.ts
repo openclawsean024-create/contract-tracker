@@ -188,3 +188,233 @@ describe("evaluateRisk — contract-level score aggregation", () => {
     expect(update?.riskLevel).toBe("red");
   });
 });
+
+// ---------------------------------------------------------------------------
+// AC-004：併入 contract-reviewer 的 13 條規則、資訊提示、決定性輸出
+// （以上原有的 14 個測試維持原樣，以下為新增）
+// ---------------------------------------------------------------------------
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { pickArticle } from "./legalDb";
+import { extractClauses } from "./pdfParser";
+import { textToPages } from "./textExtract";
+import { RISK_CATEGORY_LABELS, type LegalDB } from "../types";
+import { FAKE_CLEAN_TEXT, FAKE_RISKY_CONTRACT } from "../../tests/fixtures/fake-contracts";
+
+const realDb = JSON.parse(
+  readFileSync(resolve(__dirname, "../../public/data/legal-db.json"), "utf8")
+) as LegalDB;
+
+const evalText = (fullText: string, articles: LegalArticle[] = realDb.articles) =>
+  evaluateRisk("contract-doc", [], articles, { fullText });
+
+const firedRuleIds = (fullText: string) => {
+  const r = evalText(fullText);
+  return [...r.issues, ...r.infos].map((i) => i.ruleId);
+};
+
+// 每條新規則：一個命中案例、一個不命中案例（皆為假條文）
+const DOCUMENT_RULE_CASES: Array<{
+  id: string;
+  hit: string;
+  miss: string;
+  severity: "red" | "yellow" | "green";
+  kind: "risk" | "info";
+}> = [
+  { id: "r1", hit: "本公司得隨時調整服務費用", miss: "經雙方書面同意後得調整服務費用", severity: "red", kind: "risk" },
+  { id: "r2", hit: "違約時應支付價金三倍之違約金", miss: "違約時應支付合理之違約金", severity: "red", kind: "risk" },
+  { id: "r3", hit: "本合約期滿後自動延長一年", miss: "本合約期滿後由雙方另行議定是否續約", severity: "red", kind: "risk" },
+  { id: "r4", hit: "乙方為甲方之獨家經銷商", miss: "乙方為甲方之經銷商之一", severity: "red", kind: "risk" },
+  { id: "r5", hit: "本專案產生之智慧財產由雙方另行議定", miss: "本專案產生之智慧財產歸屬甲方", severity: "red", kind: "risk" },
+  { id: "r6", hit: "乙方應就所生損害負一切責任", miss: "乙方之賠償責任以合約總金額為上限", severity: "red", kind: "risk" },
+  { id: "r7", hit: "乙方應負保密義務", miss: "乙方應負保密義務，期限為二年", severity: "yellow", kind: "risk" },
+  { id: "r8", hit: "以臺灣臺北地方法院為第一審管轄法院", miss: "雙方應本於誠信原則協商解決", severity: "green", kind: "info" },
+  { id: "r9", hit: "因不可抗力致無法履約者不負遲延責任", miss: "乙方應如期交付測試貨品", severity: "green", kind: "info" },
+  { id: "r10", hit: "甲方得提前終止本合約", miss: "本合約期間為一年", severity: "yellow", kind: "risk" },
+  { id: "r11", hit: "乙方不得為債權讓與", miss: "乙方應親自履行本合約", severity: "yellow", kind: "risk" },
+  { id: "r12", hit: "乙方應支付懲罰性違約金", miss: "乙方應賠償甲方所受損害", severity: "red", kind: "risk" },
+  { id: "r13", hit: "乙方離職後二年內負競業禁止義務", miss: "乙方離職時應辦理交接", severity: "yellow", kind: "risk" },
+];
+
+describe("AC-004 RISK_RULES 結構", () => {
+  it("AC-004 併入 reviewer 的 13 條規則（r1–r13）都在 RISK_RULES 內", () => {
+    const ids = RISK_RULES.map((r) => r.id);
+    for (let i = 1; i <= 13; i++) expect(ids).toContain(`r${i}`);
+    expect(RISK_RULES.filter((r) => r.scope === "document")).toHaveLength(13);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("AC-004 每條規則都有 suggestion 與 category", () => {
+    const categories = Object.keys(RISK_CATEGORY_LABELS);
+    for (const rule of RISK_RULES) {
+      expect(rule.suggestion.trim().length).toBeGreaterThan(0);
+      expect(categories).toContain(rule.category);
+    }
+  });
+
+  it("AC-004 每個測試案例對應一條 document 規則，沒有遺漏", () => {
+    const documentIds = RISK_RULES.filter((r) => r.scope === "document").map((r) => r.id);
+    expect(DOCUMENT_RULE_CASES.map((c) => c.id)).toEqual(documentIds);
+  });
+
+  it("AC-004 管轄／仲裁（r8）與不可抗力（r9）是資訊提示，其餘皆為風險規則", () => {
+    const infoIds = RISK_RULES.filter((r) => r.kind === "info").map((r) => r.id);
+    expect(infoIds).toEqual(["r8", "r9"]);
+  });
+
+  it("AC-004 每條規則固定對照的法條都存在於法條庫", () => {
+    const ids = new Set(realDb.articles.map((a) => a.id));
+    for (const rule of RISK_RULES) {
+      if (rule.kind === "info") continue;
+      expect(rule.legalRefId, `規則 ${rule.id} 應指定 legalRefId`).toBeTruthy();
+      expect(ids.has(rule.legalRefId!), `${rule.id} → ${rule.legalRefId}`).toBe(true);
+    }
+  });
+});
+
+describe("AC-004 13 條新規則：命中與不命中", () => {
+  it.each(DOCUMENT_RULE_CASES)("AC-004 $id 命中：$hit", ({ id, hit, severity, kind }) => {
+    const result = evalText(hit);
+    const pool = kind === "info" ? result.infos : result.issues;
+    const item = pool.find((i) => i.ruleId === id);
+    expect(item).toBeDefined();
+    expect(item!.severity).toBe(severity);
+    expect(item!.kind).toBe(kind);
+    expect(item!.suggestion.trim().length).toBeGreaterThan(0);
+    expect(item!.category).toBe(RISK_RULES.find((r) => r.id === id)!.category);
+    if (kind === "risk") {
+      expect(item!.legalRef).toBe(RISK_RULES.find((r) => r.id === id)!.legalRefId);
+    }
+  });
+
+  it.each(DOCUMENT_RULE_CASES)("AC-004 $id 不命中：$miss", ({ id, miss }) => {
+    expect(firedRuleIds(miss)).not.toContain(id);
+  });
+
+  it("AC-004 r2 需同時出現「違約金」與倍數才命中", () => {
+    expect(firedRuleIds("乙方應於三倍工時內完成測試")).not.toContain("r2");
+    expect(firedRuleIds("違約金為報酬之雙倍")).toContain("r2");
+  });
+
+  it("AC-004 英文關鍵字不分大小寫（Liquidated Damages）", () => {
+    expect(firedRuleIds("Seller shall pay Liquidated Damages.")).toContain("r12");
+  });
+});
+
+describe("AC-004 資訊提示不計入風險分級", () => {
+  it("AC-004 只命中管轄與不可抗力時，結果仍為綠燈且 issues 為空", () => {
+    const result = evalText(
+      "因不可抗力致無法履約者不負遲延責任。以臺灣臺北地方法院為第一審管轄法院。"
+    );
+    expect(result.issues).toEqual([]);
+    expect(result.infos.map((i) => i.ruleId)).toEqual(["r8", "r9"]);
+    expect(result.score).toBe("green");
+  });
+
+  it("AC-004 資訊提示不會把黃燈拉高或拉低", () => {
+    const withoutInfo = evalText("甲方得提前終止本合約");
+    const withInfo = evalText("甲方得提前終止本合約，並以仲裁解決爭議");
+    expect(withoutInfo.score).toBe("yellow");
+    expect(withInfo.score).toBe("yellow");
+    expect(withInfo.infos).toHaveLength(1);
+  });
+
+  it("AC-004 風險結果只有綠／黃／紅三級，沒有數值分數", () => {
+    const result = evalText(FAKE_RISKY_CONTRACT);
+    expect(["green", "yellow", "red"]).toContain(result.score);
+    expect(result).not.toHaveProperty("riskScore");
+    for (const item of [...result.issues, ...result.infos]) {
+      expect(["green", "yellow", "red"]).toContain(item.severity);
+    }
+  });
+
+  it("AC-004 未提供全文時不執行 document 規則（原有呼叫方式行為不變）", () => {
+    const clauses = [makeClause("c1", "confidentiality", "乙方應就本合約之機密資訊負保密義務")];
+    const result = evaluateRisk("contract-1", clauses, realDb.articles);
+    expect(result.issues).toEqual([]);
+    expect(result.infos).toEqual([]);
+  });
+
+  it("AC-004 沒有命中任何規則的文字回傳綠燈", () => {
+    const result = evalText(FAKE_CLEAN_TEXT);
+    expect(result.issues).toEqual([]);
+    expect(result.infos).toEqual([]);
+    expect(result.score).toBe("green");
+  });
+});
+
+describe("AC-004 決定性輸出", () => {
+  const clausesFor = (text: string) => extractClauses(textToPages(text));
+
+  it("AC-004 同一份輸入呼叫兩次 evaluateRisk，結果完全相同", () => {
+    const clauses = clausesFor(FAKE_RISKY_CONTRACT);
+    const first = evaluateRisk("contract-1", clauses, realDb.articles, {
+      fullText: FAKE_RISKY_CONTRACT,
+    });
+    const second = evaluateRisk("contract-1", clauses, realDb.articles, {
+      fullText: FAKE_RISKY_CONTRACT,
+    });
+    expect(first.issues.length).toBeGreaterThan(0);
+    expect(second).toEqual(first);
+  });
+
+  it("AC-004 連續評估 20 次，法條對照與分級都不變", () => {
+    const clauses = clausesFor(FAKE_RISKY_CONTRACT);
+    const run = () =>
+      evaluateRisk("contract-1", clauses, realDb.articles, {
+        fullText: FAKE_RISKY_CONTRACT,
+      });
+    const baseline = run();
+    for (let i = 0; i < 20; i++) expect(run()).toEqual(baseline);
+  });
+
+  it("AC-004 同一條規則有多個候選法條時，固定選到同一條", () => {
+    const articles = [
+      makeArticle("art-a", "civil_law"),
+      makeArticle("art-b", "civil_law"),
+      makeArticle("art-c", "civil_law"),
+    ];
+    const clauses = [makeClause("c1", "penalty", "違約者應支付契約總額之50%作為違約金")];
+    const refs = new Set<string>();
+    for (let i = 0; i < 30; i++) {
+      refs.add(evaluateRisk("contract-1", clauses, articles).issues[0].legalRef);
+    }
+    expect([...refs]).toEqual(["art-a"]);
+  });
+
+  it("AC-004 pickArticle：固定 ID 優先，其次類別內第一筆，最後法條庫第一筆", () => {
+    const articles = [
+      makeArticle("art-x", "privacy"),
+      makeArticle("art-y", "civil_law"),
+      makeArticle("民法 §252", "civil_law"),
+    ];
+    expect(pickArticle({ legalRefId: "民法 §252", legalCategories: ["civil_law"] }, articles).id).toBe("民法 §252");
+    expect(pickArticle({ legalRefId: "不存在", legalCategories: ["civil_law"] }, articles).id).toBe("art-y");
+    expect(pickArticle({ legalCategories: ["copyright"] }, articles).id).toBe("art-x");
+    expect(pickArticle({ legalCategories: ["copyright"] }, []).id).toBe("");
+  });
+
+  it("AC-004 legalDb.ts 不使用 Math.random", () => {
+    const source = readFileSync(resolve(__dirname, "legalDb.ts"), "utf8");
+    expect(source).not.toMatch(/Math\s*\.\s*random/);
+  });
+
+  it("AC-004 規則的 RegExp 沒有 g／y 旗標（避免 lastIndex 造成前後次結果不同）", () => {
+    for (const rule of RISK_RULES) {
+      for (const re of [...rule.triggers, ...(rule.requires ?? []), ...(rule.unless ?? [])]) {
+        expect(re.global || re.sticky, `${rule.id} ${re}`).toBe(false);
+      }
+    }
+  });
+});
+
+describe("AC-004 reviewer 測試情境改寫", () => {
+  it("AC-004 綜合條款至少標出 3 項（reviewer：風險清單擴展）", () => {
+    const allClause = "單方條款 智慧財產 保密 自動續約 排他 違約金 一倍 提前終止 不可抗力 仲裁";
+    const result = evalText(allClause);
+    expect(result.issues.length).toBeGreaterThanOrEqual(3);
+    expect(result.issues.map((i) => i.ruleId)).toEqual(["r1", "r2", "r3", "r4", "r5", "r7", "r10"]);
+    expect(result.infos.map((i) => i.ruleId)).toEqual(["r8", "r9"]);
+    expect(result.score).toBe("red");
+  });
+});

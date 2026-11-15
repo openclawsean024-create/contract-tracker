@@ -14,12 +14,20 @@ type FlexSearchDocument<T extends { id: string }> = {
   update(doc: T): void;
 };
 
-// FlexSearch package typings are ambiguous; access via namespace and cast.
-const FlexSearch = FlexSearchNS as unknown as {
+// FlexSearch 的 ESM bundle 只有 default export（{ Index, Document, ... }），CJS／UMD 則直接掛在模組上；
+// 兩種形狀都要支援，否則 production build 會出現「Document is not a constructor」。
+type FlexSearchModule = {
   Document: new <T extends { id: string }>(
     options: any
   ) => FlexSearchDocument<T>;
 };
+const flexSearchNamespace = FlexSearchNS as unknown as FlexSearchModule & {
+  default?: FlexSearchModule;
+};
+const FlexSearch: FlexSearchModule =
+  typeof flexSearchNamespace.Document === "function"
+    ? flexSearchNamespace
+    : (flexSearchNamespace.default as FlexSearchModule);
 
 // Simple Chinese-friendly splitter: split by character
 // (For production we'd use Intl.Segmenter or jieba; this keeps deps small)
