@@ -1,9 +1,15 @@
-// Local notifications for expiry reminders (F-005)
-// Uses Notification API + setInterval for in-browser scheduling.
-// Per ADR-005, this is purely local. v2 may add Email / LINE.
+// 到期清單（FR-010）、瀏覽器本機通知（FR-011）與提醒排程
+// 提醒門檻與去重邏輯在 reminderDispatch.ts；這裡只負責把本機資料接上去。
+// M1 不寄真實 Email：信件只寫入本機 mock 寄件匣。
 
-import { listContracts } from "./storage";
-import type { Contract } from "../types";
+import { db, listContracts } from "./storage";
+import type { Contract, TeamMember } from "../types";
+import {
+  DexieOutboxStore,
+  MockEmailAdapter,
+  dispatchReminders,
+  type DispatchSummary,
+} from "./reminderDispatch";
 
 const REMINDER_CHECK_INTERVAL = 60 * 60 * 1000; // 1 hour
 let intervalHandle: number | null = null;
@@ -19,10 +25,11 @@ export function daysBetween(a: Date, b: Date): number {
 }
 
 export async function listExpiringContracts(
-  withinDays = 90
+  withinDays = 90,
+  now: Date = new Date()
 ): Promise<ExpiringContract[]> {
   const contracts = await listContracts();
-  const today = new Date();
+  const today = new Date(now);
   today.setHours(0, 0, 0, 0);
   const results: ExpiringContract[] = [];
   for (const c of contracts) {
@@ -56,20 +63,35 @@ export function sendNotification(title: string, body: string): boolean {
   }
 }
 
-export async function checkAndNotify(): Promise<number> {
-  const expiring = await listExpiringContracts(90);
-  let count = 0;
-  for (const { contract, daysUntilExpiry } of expiring) {
-    const d = daysUntilExpiry;
-    if (d === 30 || d === 60 || d === 90 || d === 7) {
-      const ok = sendNotification(
-        `合約到期提醒 — ${contract.title}`,
-        `將於 ${d} 天後到期（${contract.expiresAt}），對象：${contract.counterparty}`
-      );
-      if (ok) count++;
-    }
+/**
+ * 執行一次提醒檢查：依每份合約的 reminderDaysBefore（外加固定的 7 天與當天）
+ * 把到期提醒寫入本機 mock 寄件匣；只有「本次新寫入」的提醒才會發瀏覽器通知，
+ * 因此同一份合約、同一個門檻、同一天不會重複提醒。
+ */
+export async function runReminderCheck(
+  now: Date = new Date()
+): Promise<DispatchSummary> {
+  const [contracts, members] = await Promise.all([
+    listContracts(),
+    db.teamMembers.toArray() as Promise<TeamMember[]>,
+  ]);
+  const adapter = new MockEmailAdapter(new DexieOutboxStore(db), () => now);
+  const summary = await dispatchReminders({
+    today: now,
+    contracts,
+    members,
+    adapter,
+  });
+  for (const message of summary.sent) {
+    sendNotification(message.subject, message.body.split("\n")[0]);
   }
-  return count;
+  return summary;
+}
+
+/** 相容舊介面：回傳本次新觸發的提醒數量。 */
+export async function checkAndNotify(now: Date = new Date()): Promise<number> {
+  const summary = await runReminderCheck(now);
+  return summary.sent.length;
 }
 
 export function startReminderScheduler(): void {
