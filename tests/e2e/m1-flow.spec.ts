@@ -14,6 +14,8 @@ import { FAKE_RISKY_CONTRACT } from "../fixtures/fake-contracts";
 const TITLE = "【測試】軟體維護服務合約";
 const MEMBER_NAME = "測試成員甲";
 const MEMBER_EMAIL = "member.a@example.com";
+const RECIPIENT_NAME = "測試成員乙";
+const RECIPIENT_EMAIL = "member.b@example.test";
 
 test("AC-009 主流程：免責 → 貼上 → 風險標記 → 到期日與負責人 → 提醒檢查 → mock 寄件匣", async ({
   page,
@@ -26,6 +28,7 @@ test("AC-009 主流程：免責 → 貼上 → 風險標記 → 到期日與負�
 
   // --- 團隊（本機 mock）：新增成員並設為目前身分 ---
   await addMember(page, MEMBER_NAME, MEMBER_EMAIL);
+  await addMember(page, RECIPIENT_NAME, RECIPIENT_EMAIL);
   await page.getByTestId("current-member-select").selectOption({ label: MEMBER_NAME });
 
   // --- 合約列表：未勾選免責時不能上傳 ---
@@ -57,8 +60,8 @@ test("AC-009 主流程：免責 → 貼上 → 風險標記 → 到期日與負�
   await expect(page.getByTestId("risk-list")).toContainText("自動續約");
   await expect(page.getByTestId("risk-list")).toContainText("單方變更或決定條款");
   // 管轄條款是資訊提示，不在風險清單內
-  await expect(page.getByTestId("risk-info-list")).toContainText("已約定管轄或仲裁");
-  await expect(page.getByTestId("risk-list")).not.toContainText("已約定管轄或仲裁");
+  await expect(page.getByTestId("risk-info-list")).toContainText("提及管轄或仲裁");
+  await expect(page.getByTestId("risk-list")).not.toContainText("提及管轄或仲裁");
   // 只有綠／黃／紅三級，沒有 1–10 數值分數
   await expect(page.getByTestId("risk-section")).not.toContainText("/10");
   // AC-008：合約詳情頁可見免責聲明（頁尾與風險結果區）
@@ -72,6 +75,17 @@ test("AC-009 主流程：免責 → 貼上 → 風險標記 → 到期日與負�
   await expect(page.getByTestId("reminder-thresholds")).toContainText("到期前 45 天");
   await page.getByTestId("expires-input").fill("2026-12-31");
   await expect(page.getByTestId("resolved-recipients")).toContainText(MEMBER_EMAIL);
+  // 負責人與提醒收件人用不同成員：信件應只寄給收件人
+  await page.getByTestId("recipient-list").getByLabel(RECIPIENT_NAME).check();
+  await expect(page.getByTestId("resolved-recipients")).toContainText(RECIPIENT_EMAIL);
+  await expect(page.getByTestId("resolved-recipients")).not.toContainText(MEMBER_EMAIL);
+  await expect(page.getByText("已更新：提醒收件人")).toBeVisible();
+  // 重新載入，確認設定真的寫進本機資料庫，而不只是畫面狀態
+  await page.reload();
+  await expect(page.getByTestId("owner-select")).not.toHaveValue("");
+  await expect(page.getByTestId("reminder-days-input")).toHaveValue("45");
+  await expect(page.getByTestId("expires-input")).toHaveValue("2026-12-31");
+  await expect(page.getByTestId("recipient-list").getByLabel(RECIPIENT_NAME)).toBeChecked();
 
   // --- 觸發提醒檢查 → 在 mock 寄件匣看到信件 ---
   await gotoRoute(page, "/outbox");
@@ -82,7 +96,8 @@ test("AC-009 主流程：免責 → 貼上 → 風險標記 → 到期日與負�
   await expect(emails).toHaveCount(1);
   await expect(emails.getByTestId("outbox-subject")).toContainText(TITLE);
   await expect(emails.getByTestId("outbox-subject")).toContainText("45 天後到期");
-  await expect(emails.getByTestId("outbox-to")).toContainText(MEMBER_EMAIL);
+  await expect(emails.getByTestId("outbox-to")).toHaveText(`收件人：${RECIPIENT_EMAIL}`);
+  await expect(emails.getByTestId("outbox-body")).toContainText(`負責人：${MEMBER_NAME}`);
   await expect(emails.getByTestId("outbox-body")).toContainText("2026-12-31");
   // AC-008：提醒信內文包含免責聲明
   await expect(emails.getByTestId("outbox-body")).toContainText(DISCLAIMER_TEXT);
@@ -148,4 +163,36 @@ test("AC-006 使用者設定的提醒天數實際生效：未命中的日期不�
   await page.getByTestId("run-reminder-check").click();
   await expect(page.getByTestId("outbox-email")).toHaveCount(1);
   await expect(page.getByTestId("outbox-to")).toContainText("未設定收件人");
+});
+
+test("AC-006 背景排程寫入的提醒會即時出現在已開啟的寄件匣", async ({ page }) => {
+  await openApp(page);
+  await gotoRoute(page, "/contracts");
+  await page.getByTestId("disclaimer-ack").check();
+  await page.getByTestId("paste-title").fill(TITLE);
+  await page.getByTestId("paste-textarea").fill(FAKE_RISKY_CONTRACT);
+  await page.getByTestId("paste-submit").click();
+  await expect(page.getByTestId("risk-section")).toBeVisible();
+  // 固定時鐘的今天是 2026-11-16 → 到期前 7 天固定提醒
+  await page.getByTestId("expires-input").fill("2026-11-23");
+  await expect(page.getByText("已更新：到期日")).toBeVisible();
+
+  // 重新載入讓排程重新計時（首次檢查在載入 5 秒後），並在排程執行前先打開寄件匣
+  await page.reload();
+  await gotoRoute(page, "/outbox");
+  await expect(page.getByTestId("outbox-email")).toHaveCount(0);
+  // 不按「立即檢查提醒」，等背景排程寫入
+  await expect(page.getByTestId("outbox-email")).toHaveCount(1, { timeout: 15_000 });
+  await expect(page.getByTestId("outbox-subject")).toContainText("7 天後到期");
+  await expect(page.getByTestId("outbox-status")).toHaveCount(0);
+});
+
+test("AC-008 未勾選免責確認時不能匯入 JSON 備份", async ({ page }) => {
+  await openApp(page);
+  await gotoRoute(page, "/contracts");
+  await expect(page.getByTestId("disclaimer-ack")).not.toBeChecked();
+  await expect(page.getByTestId("import-input")).toBeDisabled();
+  await page.getByTestId("disclaimer-ack").check();
+  await expect(page.getByTestId("import-input")).toBeEnabled();
+  await expect(page.getByTestId("contract-row")).toHaveCount(0);
 });

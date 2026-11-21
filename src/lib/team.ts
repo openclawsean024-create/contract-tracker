@@ -29,14 +29,11 @@ export interface TeamAdapter {
   removeMember(id: string): Promise<void>;
 }
 
-/** M1 只允許假資料網域（example.com／example.test，含其子網域）。 */
+/** M1 只允許假資料網域：精確比對 example.com 或 example.test（GOAL AC-007），不含子網域。 */
 export function isAllowedMockEmail(email: string): boolean {
-  const m = /^[^\s@]+@([^\s@]+)$/.exec(email.trim().toLowerCase());
+  const m = /^[^\s@]+@([^\s@]+)$/.exec((email ?? "").trim().toLowerCase());
   if (!m) return false;
-  const domain = m[1];
-  return ALLOWED_MOCK_EMAIL_DOMAINS.some(
-    (d) => domain === d || domain.endsWith(`.${d}`)
-  );
+  return (ALLOWED_MOCK_EMAIL_DOMAINS as readonly string[]).includes(m[1]);
 }
 
 export function validateMemberInput(
@@ -86,15 +83,19 @@ export class LocalTeamAdapter implements TeamAdapter {
   }
 
   async addMember(input: NewMemberInput): Promise<TeamMember> {
-    const existing = await this.listMembers();
-    const valid = validateMemberInput(input, existing);
-    const member: TeamMember = {
-      id: this.options.generateId(),
-      ...valid,
-      createdAt: this.options.now().toISOString(),
-    };
-    await this.database.teamMembers.add(member);
-    return member;
+    const { database } = this;
+    // 檢查與新增在同一個讀寫交易中：同時新增兩筆相同 Email 時，第二筆會看到第一筆而被拒絕
+    return database.transaction("rw", database.teamMembers, async () => {
+      const existing = await database.teamMembers.toArray();
+      const valid = validateMemberInput(input, existing);
+      const member: TeamMember = {
+        id: this.options.generateId(),
+        ...valid,
+        createdAt: this.options.now().toISOString(),
+      };
+      await database.teamMembers.add(member);
+      return member;
+    });
   }
 
   async removeMember(id: string): Promise<void> {

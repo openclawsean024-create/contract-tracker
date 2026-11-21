@@ -1,14 +1,27 @@
-// E2E 共用 fixture：攔截所有網路請求，斷言只有對本機 origin 的請求（AC-010）。
+// E2E 共用 fixture：攔截所有網路請求（AC-010）。
+// 只允許對本機 origin 的 GET，且只能是 app 本身的靜態資源；任何帶 body 的請求或其他路徑都算違規，
+// 因此「把合約內文 POST 到同源端點」也會被抓到（Codex 審查 #12）。
 import { test as base, expect, type Page } from "@playwright/test";
 
 export const FIXED_NOW = new Date("2026-11-16T10:00:00+08:00");
 export const FIXED_TODAY = "2026-11-16";
 
-const isLocal = (url: string, origin: string) =>
-  url.startsWith(`${origin}/`) ||
-  url === origin ||
-  url.startsWith("data:") ||
-  url.startsWith("blob:");
+const ALLOWED_LOCAL_PATHS =
+  /^\/(?:index\.html)?$|^\/assets\/[\w.-]+$|^\/data\/(?:legal-db|templates)\.json$|^\/favicon\.svg$/;
+
+function violation(
+  request: import("@playwright/test").Request,
+  origin: string
+): string | null {
+  const url = request.url();
+  if (url.startsWith("data:") || url.startsWith("blob:")) return null;
+  const parsed = new URL(url);
+  if (parsed.origin !== origin) return `外部請求：${url}`;
+  if (request.method() !== "GET") return `非 GET 請求：${request.method()} ${url}`;
+  if (request.postData()) return `帶 body 的請求：${url}`;
+  if (!ALLOWED_LOCAL_PATHS.test(parsed.pathname)) return `非預期的本機路徑：${parsed.pathname}`;
+  return null;
+}
 
 export const test = base.extend<{ networkGuard: { seen: string[]; external: string[] } }>({
   networkGuard: [
@@ -17,18 +30,19 @@ export const test = base.extend<{ networkGuard: { seen: string[]; external: stri
       const seen: string[] = [];
       const external: string[] = [];
       await context.route("**/*", async (route) => {
-        const url = route.request().url();
-        seen.push(url);
-        if (isLocal(url, origin)) {
-          await route.continue();
-        } else {
-          external.push(url);
+        const request = route.request();
+        seen.push(request.url());
+        const problem = violation(request, origin);
+        if (problem) {
+          external.push(problem);
           await route.abort();
+        } else {
+          await route.continue();
         }
       });
       await use({ seen, external });
       expect(seen.length, "應該至少攔截到載入 app 的請求").toBeGreaterThan(0);
-      expect(external, "E2E 期間只能有對本機 origin 的請求").toEqual([]);
+      expect(external, "E2E 期間只能有對本機 app 靜態資源的 GET 請求").toEqual([]);
     },
     { auto: true },
   ],

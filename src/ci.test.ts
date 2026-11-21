@@ -20,6 +20,13 @@ describe("AC-009 CI 品質閘門", () => {
     }
   });
 
+  it("AC-009 合併到 main（push）不會自動部署（M1 不部署）", () => {
+    const deploy = ci.slice(ci.indexOf("\n  deploy:"));
+    const condition = /\n\s+if:\s*(.+)/.exec(deploy)?.[1] ?? "";
+    expect(condition).toContain("workflow_dispatch");
+    expect(condition).not.toMatch(/push/);
+  });
+
   it("AC-009 安裝步驟不得以 `|| npm install` 掩蓋 lockfile 不一致", () => {
     expect(ci).not.toMatch(/npm ci[^\n]*\|\|/);
   });

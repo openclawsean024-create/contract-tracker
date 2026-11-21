@@ -88,3 +88,22 @@ describe("AC-003 契約類型自動偵測", () => {
     expect(contract.riskAnalysis.length).toBeGreaterThan(0);
   });
 });
+
+describe("AC-003 混合條款時以明確的契約名稱為準（Codex 審查 #6）", () => {
+  it.each([
+    ["勞動契約。甲方僱用乙方，乙方應保密。", "僱傭"],
+    ["房屋租賃契約。承租人對出租人之資料負保密義務。", "租賃"],
+    ["採購合約：乙方應交貨，並對報價保密。", "採購"],
+    ["軟體授權合約。被授權方應保密原始碼。", "授權"],
+    ["顧問合約。乙方提供諮詢並負保密義務。", "顧問"],
+    ["保密協議。本協議適用於雙方之採購洽談。", "NDA"],
+    ["甲方僱用乙方，月薪 NT$50000，乙方應保密。", "僱傭"],
+  ])("AC-003 %s → %s", (text, expected) => {
+    expect(detectContractType(text)).toBe(expected);
+  });
+
+  it("AC-003 多個契約名稱時取最早出現者（通常是標題）", () => {
+    expect(detectContractType("勞動契約\n附件：保密協議")).toBe("僱傭");
+    expect(detectContractType("保密協議\n附件：勞動契約範本")).toBe("NDA");
+  });
+});

@@ -91,6 +91,8 @@ export interface Contract {
   expiresAt: string;
   pdfHash?: string;
   extractedText?: string;
+  /** 原始擷取文字的總字數（extractedText 只保存前 8,000 字） */
+  extractedTextLength?: number;
   riskScore: RiskLevel;
   riskAnalysis: RiskIssue[];
   reminderDaysBefore: number;

@@ -62,6 +62,29 @@ export function pickArticle(
   return byCategory ?? articles[0] ?? NO_ARTICLE;
 }
 
+/** 否定語：「不自動續約」「不得自動延長」「非自動續約」等不應視為自動續約 */
+const NEGATED_RENEWAL = /(?:不|無|非|不得|不會|不予|不再|並不)\s*(?:會\s*)?自動(?:續約|延長)/;
+const AUTO_RENEWAL_ANY = /自動(?:續約|延長)/g;
+
+/** 文字中是否有「未被否定」的自動續約／延長 */
+export function hasAffirmativeAutoRenewal(text: string): boolean {
+  for (const m of text.matchAll(AUTO_RENEWAL_ANY)) {
+    const before = text.slice(Math.max(0, m.index! - 4), m.index!);
+    if (!/(?:不|無|非|不得|不會|不予|不再)\s*(?:會\s*)?$/.test(before)) return true;
+  }
+  return false;
+}
+
+/** 依句號、分號、問號、驚嘆號與換行切句；全文規則只在同一句內比對條件 */
+export function splitSentences(text: string): Array<{ text: string; offset: number }> {
+  const out: Array<{ text: string; offset: number }> = [];
+  const re = /[^。；;！!？?\n]+/g;
+  for (const m of text.matchAll(re)) {
+    if (m[0].trim()) out.push({ text: m[0], offset: m.index! });
+  }
+  return out;
+}
+
 /** 取出命中位置所在那一行的片段（不跨行），方便使用者回頭找原文。 */
 function excerpt(text: string, index: number, length: number): string {
   const lineStart = text.lastIndexOf("\n", index - 1) + 1;
@@ -267,7 +290,10 @@ const CLAUSE_RULES: RiskRule[] = [
       /(?:不{0,1}得|禁止).{0,8}(?:終止|解除)/i,
     ],
     apply: (snippet, art) => {
-      if (/自動續約|視為.{0,4}續約/i.test(snippet)) {
+      if (
+        hasAffirmativeAutoRenewal(snippet) ||
+        (/視為.{0,4}續約/i.test(snippet) && !/不(?:得)?視為.{0,4}續約/.test(snippet))
+      ) {
         return {
           ruleId: "t-term",
           issue: `條款含自動續約：「${snippet.slice(0, 60)}...」`,
@@ -286,6 +312,9 @@ const CLAUSE_RULES: RiskRule[] = [
 
 // ---- 併入 contract-reviewer 的 13 條全文層級規則（M-04、M-05）----
 // 分級對應：reviewer 的 high → 紅、medium → 黃；r8、r9 屬於「已約定」，改為資訊提示，不計入風險。
+/** 「留待另議」「另行協商」「未約定」等表示尚未約定 */
+const UNDECIDED = /另議|另行(?:協商|約定|議定|協議)|未(?:約定|規定)|尚未|待定/;
+
 const DOCUMENT_RULES: RiskRule[] = [
   documentRule({
     id: "r1",
@@ -298,6 +327,8 @@ const DOCUMENT_RULES: RiskRule[] = [
       "建議改為雙方書面同意後才能變更，並約定通知期間；簽署前請與律師確認。",
     legalRefId: "民法 §247-1",
     triggers: [/單方|本公司得/i],
+    // 「不得單方變更」「非經雙方同意…不得單方」是限制單方權利，不是霸王條款
+    unless: [/(?:不得|不可|不能|禁止|無權)\s*單方/],
   }),
   documentRule({
     id: "r2",
@@ -309,8 +340,11 @@ const DOCUMENT_RULES: RiskRule[] = [
     suggestion:
       "建議設定違約金上限並確認與可能損害相當；是否過高請諮詢律師。",
     legalRefId: "民法 §252",
-    triggers: [/一倍|雙倍|三倍/i],
-    requires: [/違約金/i],
+    // 倍數必須直接修飾違約金（同一句、相距不遠），避免「違約金上限一千元；提供一倍備品」誤判
+    triggers: [
+      /違約金[^。；;，,]{0,12}(?:一倍|雙倍|三倍|[二兩三四五六七八九十]倍)/i,
+      /(?:一倍|雙倍|三倍|[二兩三四五六七八九十]倍)[^。；;，,]{0,8}違約金/i,
+    ],
   }),
   documentRule({
     id: "r3",
@@ -323,6 +357,7 @@ const DOCUMENT_RULES: RiskRule[] = [
       "建議約定「到期前若干天以書面通知不續約」的機制，並在本工具設定到期提醒。",
     legalRefId: "民法 §247-1",
     triggers: [/自動續約|自動延長/i],
+    unless: [NEGATED_RENEWAL],
   }),
   documentRule({
     id: "r4",
@@ -349,7 +384,7 @@ const DOCUMENT_RULES: RiskRule[] = [
     legalRefId: "著作權法 §12",
     legalCategories: ["copyright", "civil_law"],
     triggers: [/智慧財產/i],
-    unless: [/歸屬/i],
+    unless: [/歸屬|歸(?:甲方|乙方|屬|於)|屬於(?:甲方|乙方)/i],
   }),
   documentRule({
     id: "r6",
@@ -374,7 +409,10 @@ const DOCUMENT_RULES: RiskRule[] = [
     legalRefId: "營業秘密法 §2",
     legalCategories: ["trade_secret", "privacy"],
     triggers: [/保密/i],
-    unless: [/期限/i],
+    // 同一句內有期限或具體期間（例如「保密二年」「保密期間 3 年」）即視為已約定期限
+    unless: [
+      /期限|期間|屆滿|終止後|[0-9０-９]+\s*(?:年|個月)|[一二三四五六七八九十兩]+\s*(?:年|個月)/i,
+    ],
   }),
   documentRule({
     id: "r8",
@@ -382,10 +420,11 @@ const DOCUMENT_RULES: RiskRule[] = [
     kind: "info",
     category: "dispute",
     severity: "green",
-    title: "已約定管轄或仲裁",
-    explanation: "合約已約定爭端解決方式",
-    suggestion: "請確認約定的法院或仲裁地點對己方是否方便。",
+    title: "提及管轄或仲裁",
+    explanation: "內文提到管轄法院或仲裁，請確認是否已明確約定",
+    suggestion: "請確認是否已明確約定法院或仲裁地點，以及該地點對己方是否方便。",
     triggers: [/管轄|仲裁/i],
+    unless: [UNDECIDED],
   }),
   documentRule({
     id: "r9",
@@ -393,10 +432,11 @@ const DOCUMENT_RULES: RiskRule[] = [
     kind: "info",
     category: "validity",
     severity: "green",
-    title: "已約定不可抗力",
-    explanation: "合約已約定不可抗力或天災的處理方式",
-    suggestion: "請確認不可抗力的範圍與通知義務是否明確。",
+    title: "提及不可抗力",
+    explanation: "內文提到不可抗力或天災，請確認處理方式是否已明確約定",
+    suggestion: "請確認不可抗力的範圍、通知義務與處理方式是否明確。",
     triggers: [/不可抗力|天災/i],
+    unless: [UNDECIDED],
   }),
   documentRule({
     id: "r10",
@@ -466,15 +506,18 @@ export interface EvaluateRiskOptions {
   fullText?: string;
 }
 
+/** 全文規則：逐句比對，requires／unless 只看同一句，避免把不同條款的文字湊在一起判斷 */
 function firstMatch(
   rule: RiskRule,
   text: string
 ): { index: number; length: number } | null {
-  if (rule.requires?.some((re) => !re.test(text))) return null;
-  if (rule.unless?.some((re) => re.test(text))) return null;
-  for (const trigger of rule.triggers) {
-    const m = trigger.exec(text);
-    if (m) return { index: m.index, length: m[0].length };
+  for (const sentence of splitSentences(text)) {
+    if (rule.requires?.some((re) => !re.test(sentence.text))) continue;
+    if (rule.unless?.some((re) => re.test(sentence.text))) continue;
+    for (const trigger of rule.triggers) {
+      const m = trigger.exec(sentence.text);
+      if (m) return { index: sentence.offset + m.index, length: m[0].length };
+    }
   }
   return null;
 }

@@ -66,8 +66,11 @@ describe("AC-007 成員管理", () => {
   it("AC-007 Email 只接受 example.com／example.test 網域", async () => {
     expect(isAllowedMockEmail("user@example.com")).toBe(true);
     expect(isAllowedMockEmail("user@example.test")).toBe(true);
-    expect(isAllowedMockEmail("user@team.example.com")).toBe(true);
+    expect(isAllowedMockEmail("User@Example.COM")).toBe(true);
     for (const bad of [
+      // GOAL AC-007 只列 example.com／example.test 兩個網域，子網域不接受
+      emailAt("team.example.com"),
+      emailAt("mail.example.test"),
       emailAt("example.org"),
       emailAt("notexample.com"),
       emailAt("example.com.evil.invalid"),
@@ -81,6 +84,17 @@ describe("AC-007 成員管理", () => {
       adapter.addMember({ name: "測試成員", email: emailAt("example.org"), role: "admin" })
     ).rejects.toBeInstanceOf(TeamValidationError);
     expect(await adapter.listMembers()).toEqual([]);
+  });
+
+  it("AC-007 同時新增兩筆相同 Email，只有一筆成功", async () => {
+    const results = await Promise.allSettled([
+      adapter.addMember({ name: "測試成員甲", email: "member@example.com", role: "admin" }),
+      adapter.addMember({ name: "測試成員甲", email: "member@example.com", role: "admin" }),
+    ]);
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    const rejected = results.find((r) => r.status === "rejected") as PromiseRejectedResult;
+    expect(rejected.reason).toBeInstanceOf(TeamValidationError);
+    expect(await adapter.listMembers()).toHaveLength(1);
   });
 
   it("AC-007 姓名必填、Email 不可重複", async () => {

@@ -29,6 +29,8 @@ src/
     workflow.ts       # 5 階段審核工作流、註解
     reminderDispatch.ts # 提醒門檻、EmailAdapter、MockEmailAdapter、寄件匣
     reminder.ts       # 到期清單、瀏覽器通知、排程
+    dates.ts          # 日曆日期（YYYY-MM-DD）共用處理
+    contractIntake.ts # 新增／匯入合約前的免責確認
     team.ts           # TeamAdapter、LocalTeamAdapter、負責人／收件人
     disclaimer.ts     # DISCLAIMER_TEXT 與首次使用確認
     storage.ts        # Dexie IndexedDB（schema v2）、JSON 匯出入

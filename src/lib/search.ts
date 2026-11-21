@@ -97,12 +97,22 @@ const SEARCH_LIMIT = 100;
  * 因此剛改過標題或剛刪除的合約不會出現過期的結果（本機資料量小，重建成本可忽略）。
  * 同一份合約只回傳一次，field 為第一個命中的欄位（標題 → 內文 → 對方）。
  */
+/** 查詢拆成「詞」（以空白或標點分隔），每個詞都要以連續字串出現在命中的欄位中 */
+function queryPhrases(query: string): string[] {
+  return query
+    .toLowerCase()
+    .split(/[\s，。、；：！？,.;:!?()（）「」『』"']+/)
+    .filter((p) => encodeForSearch(p).length > 0);
+}
+
 export async function searchContracts(
   query: string
 ): Promise<Array<{ id: string; field: string }>> {
-  if (encodeForSearch(query).length === 0) return [];
+  const phrases = queryPhrases(query);
+  if (phrases.length === 0) return [];
   buildSearchIndex();
   const idx = await ensureIndex();
+  const byId = new Map((await listContracts()).map((c) => [c.id, c]));
   const results = idx.search(query, { limit: SEARCH_LIMIT });
   const matches: Array<{ id: string; field: string }> = [];
   const seen = new Set<string>();
@@ -110,6 +120,12 @@ export async function searchContracts(
     for (const rawId of res.result ?? []) {
       const id = String(rawId);
       if (seen.has(id)) continue;
+      // 索引用 bigram 找出候選；再確認完整詞真的連續出現，
+      // 避免「自動」「動續」「續約」分散在不同位置時誤中「自動續約」（Codex 審查 #11）
+      const value = String(
+        (byId.get(id) as Record<string, unknown> | undefined)?.[res.field] ?? ""
+      ).toLowerCase();
+      if (!phrases.every((p) => value.includes(p))) continue;
       seen.add(id);
       matches.push({ id, field: res.field });
     }

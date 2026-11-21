@@ -10,7 +10,8 @@ import {
   type TextExtractSuccess,
 } from "../lib/textExtract";
 import { analyzeContract } from "../lib/analyze";
-import { saveContract, deleteContract, exportAll, importAll } from "../lib/storage";
+import { deleteContract, exportAll } from "../lib/storage";
+import { commitAnalyzedContract, importBackup } from "../lib/contractIntake";
 import { useAppStore } from "../store";
 import { invalidateIndex, ensureIndex } from "../lib/search";
 import { DISCLAIMER_ACK_LABEL, canUpload } from "../lib/disclaimer";
@@ -26,6 +27,7 @@ export default function ContractsPage() {
   const legalDb = useAppStore((s) => s.legalDb);
   const members = useAppStore((s) => s.members);
   const refresh = useAppStore((s) => s.refreshContracts);
+  const refreshMembers = useAppStore((s) => s.refreshMembers);
   const ack = useAppStore((s) => s.disclaimerAck);
   const setAck = useAppStore((s) => s.setDisclaimerAck);
   const navigate = useNavigate();
@@ -69,7 +71,8 @@ export default function ContractsPage() {
       now: new Date(),
       pdfHash: fileHash,
     });
-    await saveContract(contract);
+    // 解析期間使用者可能已取消勾選：以「當下」的狀態為準
+    await commitAnalyzedContract(contract, () => useAppStore.getState().disclaimerAck);
     invalidateIndex();
     await ensureIndex();
     await refresh();
@@ -136,11 +139,22 @@ export default function ContractsPage() {
     const file = e.target.files?.[0];
     if (!file) return;
     setBusy(true);
+    setError(null);
     try {
       const text = await file.text();
-      const count = await importAll(text);
+      const r = await importBackup(text, () => useAppStore.getState().disclaimerAck);
+      invalidateIndex();
       await refresh();
-      setStatus(`已匯入 ${count} 份合約`);
+      await refreshMembers();
+      setStatus(
+        `已匯入 ${r.contractsAdded} 份合約、${r.membersAdded} 位成員` +
+          (r.contractsSkipped + r.membersSkipped > 0
+            ? `；本機已有的 ${r.contractsSkipped} 份合約、${r.membersSkipped} 位成員保留本機版本，未覆蓋`
+            : "") +
+          (r.contractsInvalid + r.membersInvalid > 0
+            ? `；${r.contractsInvalid + r.membersInvalid} 筆資料格式不正確，已略過`
+            : "")
+      );
     } catch (err: any) {
       setError(`匯入失敗：${err.message || err}`);
     } finally {
@@ -173,18 +187,25 @@ export default function ContractsPage() {
             >
               <Download size={16} /> 匯出 JSON
             </button>
-            <label className="px-3 py-2 text-sm rounded-lg bg-slate-100 hover:bg-slate-200 cursor-pointer flex items-center gap-1">
+            <label
+              className={`px-3 py-2 text-sm rounded-lg bg-slate-100 flex items-center gap-1 ${
+                uploadAllowed && !busy ? "hover:bg-slate-200 cursor-pointer" : "opacity-50 cursor-not-allowed"
+              }`}
+            >
               <Upload size={16} /> 匯入 JSON
               <input
                 type="file"
+                data-testid="import-input"
+                aria-label="匯入 JSON 備份"
                 accept="application/json"
                 className="hidden"
+                disabled={!uploadAllowed || busy}
                 onChange={handleImport}
               />
             </label>
           </div>
           <span className="text-[11px] text-slate-500">
-            匯出的 JSON 為明文，請妥善保存。
+            匯出的 JSON 為明文，請妥善保存。匯入不會覆蓋本機已有的合約。
           </span>
         </div>
       </header>

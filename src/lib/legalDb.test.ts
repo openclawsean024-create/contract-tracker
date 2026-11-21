@@ -195,7 +195,7 @@ describe("evaluateRisk — contract-level score aggregation", () => {
 // ---------------------------------------------------------------------------
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { pickArticle } from "./legalDb";
+import { hasAffirmativeAutoRenewal, pickArticle, splitSentences } from "./legalDb";
 import { extractClauses } from "./pdfParser";
 import { textToPages } from "./textExtract";
 import { RISK_CATEGORY_LABELS, type LegalDB } from "../types";
@@ -416,5 +416,87 @@ describe("AC-004 reviewer 測試情境改寫", () => {
     expect(result.issues.map((i) => i.ruleId)).toEqual(["r1", "r2", "r3", "r4", "r5", "r7", "r10"]);
     expect(result.infos.map((i) => i.ruleId)).toEqual(["r8", "r9"]);
     expect(result.score).toBe("red");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Codex 審查 #3、#4：不同條款的文字不得湊在一起判斷；否定句不得產生相反的結果
+// ---------------------------------------------------------------------------
+describe("AC-004 全文規則只在同一句內比對", () => {
+  it("AC-004 r2：違約金與倍數在不同句時不命中，倍數直接修飾違約金才命中", () => {
+    expect(firedRuleIds("違約金上限為新台幣一千元。\n交貨時乙方應提供一倍數量之備品。")).not.toContain("r2");
+    expect(firedRuleIds("違約金上限一千元，並提供一倍數量之備品")).not.toContain("r2");
+    expect(firedRuleIds("違約時應給付相當於報酬三倍之違約金。")).toContain("r2");
+    expect(firedRuleIds("違約金為價金之雙倍。")).toContain("r2");
+  });
+
+  it("AC-004 r7：其他句子的期限不會讓保密條款漏報", () => {
+    const text = "本契約期限一年。\n乙方對甲方之營業資料負保密義務。";
+    expect(firedRuleIds(text)).toContain("r7");
+  });
+
+  it("AC-004 r7：「保密二年」「保密期間 3 年」視為已約定期限，不誤報", () => {
+    expect(firedRuleIds("乙方應保密二年。")).not.toContain("r7");
+    expect(firedRuleIds("乙方之保密期間為 3 年。")).not.toContain("r7");
+    expect(firedRuleIds("乙方應於離職後 24 個月內保密。")).not.toContain("r7");
+  });
+
+  it("AC-004 r5：其他句子的「歸屬」不會讓智慧財產條款漏報", () => {
+    const text = "本設備之所有權歸屬甲方。\n本案涉及之智慧財產由雙方日後協商。";
+    expect(firedRuleIds(text)).toContain("r5");
+  });
+
+  it("AC-004 splitSentences 依句號、分號與換行切句並保留位置", () => {
+    expect(splitSentences("甲。乙；丙\n丁").map((s) => [s.text, s.offset])).toEqual([
+      ["甲", 0],
+      ["乙", 2],
+      ["丙", 4],
+      ["丁", 6],
+    ]);
+  });
+});
+
+describe("AC-004 否定句與尚未約定", () => {
+  it("AC-004 r3：「不自動續約」「不得自動延長」不命中", () => {
+    for (const text of [
+      "本合約期滿不自動續約。",
+      "本合約期滿後不得自動延長。",
+      "本合約非自動續約，須另訂新約。",
+      "本合約到期後並不會自動續約。",
+    ]) {
+      expect(firedRuleIds(text), text).not.toContain("r3");
+    }
+    expect(firedRuleIds("本合約期滿後自動續約一年。")).toContain("r3");
+  });
+
+  it("AC-004 原有條款規則：否定的自動續約不標黃燈", () => {
+    const negated = [makeClause("c1", "term", "本合約期滿不自動續約，雙方應另行協議")];
+    expect(evaluateRisk("contract-1", negated, realDb.articles).score).toBe("green");
+    const affirmative = [makeClause("c1", "term", "本合約期滿後自動續約一年")];
+    expect(evaluateRisk("contract-1", affirmative, realDb.articles).score).toBe("yellow");
+  });
+
+  it("AC-004 hasAffirmativeAutoRenewal：同時有否定與肯定時仍視為有自動續約", () => {
+    expect(hasAffirmativeAutoRenewal("本合約不自動續約")).toBe(false);
+    expect(hasAffirmativeAutoRenewal("附約不自動續約，但主約自動續約一年")).toBe(true);
+  });
+
+  it("AC-004 r1：限制單方變更的句子不命中", () => {
+    expect(firedRuleIds("非經雙方書面同意，任一方不得單方變更本合約。")).not.toContain("r1");
+    expect(firedRuleIds("本公司得隨時調整費用。")).toContain("r1");
+  });
+
+  it("AC-004 r8／r9：「留待另議」不顯示提及管轄或不可抗力", () => {
+    const result = evalText("不可抗力處理方式及仲裁地點均留待另議。");
+    expect(result.infos).toEqual([]);
+    expect(result.issues).toEqual([]);
+  });
+
+  it("AC-004 r8／r9 的文案只指出「提及」，不宣稱已約定", () => {
+    for (const id of ["r8", "r9"]) {
+      const rule = RISK_RULES.find((r) => r.id === id)!;
+      expect(rule.title).toMatch(/^提及/);
+      expect(rule.title).not.toContain("已約定");
+    }
   });
 });

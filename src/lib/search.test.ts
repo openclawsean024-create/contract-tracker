@@ -161,3 +161,17 @@ describe("FR-019 中文全文搜尋", () => {
     expect(await ids("測試")).toEqual(["zh-lease"]);
   });
 });
+
+describe("FR-019 完整詞確認（Codex 審查 #11）", () => {
+  it("FR-019 bigram 分散在不同位置時不誤中", async () => {
+    await saveContract(
+      makeTestContract({
+        id: "scattered",
+        title: "【測試】分散",
+        extractedText: "約定自動，日後才動續，最終再續約。",
+      })
+    );
+    expect(await ids("自動續約")).not.toContain("scattered");
+    expect(await ids("續約")).toContain("scattered");
+  });
+});

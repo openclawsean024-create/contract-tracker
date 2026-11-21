@@ -4,6 +4,7 @@ import type { Contract, ContractSource, LegalArticle } from "../types";
 import { detectContractType, DETECTED_TYPE_TO_CATEGORY } from "./contractType";
 import { evaluateRisk } from "./legalDb";
 import { extractClauses, type ExtractedPage } from "./pdfParser";
+import { addDaysKey } from "./dates";
 
 /** 本機保存的合約內文上限（字元） */
 export const EXTRACTED_TEXT_LIMIT = 8000;
@@ -27,7 +28,6 @@ export function analyzeContract(input: AnalyzeInput): Contract {
     fullText: input.fullText,
   });
   const detectedType = detectContractType(input.fullText);
-  const expires = new Date(input.now.getTime() + 365 * 24 * 60 * 60 * 1000);
 
   return {
     id: input.id,
@@ -37,9 +37,11 @@ export function analyzeContract(input: AnalyzeInput): Contract {
     source: input.source,
     counterparty: "未設定",
     // 到期日不會從內文擷取（FR-009 屬 M2），先預設一年後，請使用者自行確認修改
-    expiresAt: expires.toISOString().slice(0, 10),
+    expiresAt: addDaysKey(input.now, 365),
     pdfHash: input.pdfHash,
     extractedText: input.fullText.slice(0, EXTRACTED_TEXT_LIMIT),
+    // 條款擷取與規則比對用的是完整內文；本機只保存前 EXTRACTED_TEXT_LIMIT 字，畫面上會揭露截斷
+    extractedTextLength: input.fullText.length,
     riskScore: evaluation.score,
     riskAnalysis: evaluation.issues,
     riskNotes: evaluation.infos,

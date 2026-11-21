@@ -1,5 +1,6 @@
 // 模擬寄件匣（FR-012）：M1 的到期提醒信只寫入本機，不會真的寄出。
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
+import { liveQuery } from "dexie";
 import { Link } from "react-router-dom";
 import { Mail, RefreshCw } from "lucide-react";
 import { db } from "../lib/storage";
@@ -14,19 +15,19 @@ export default function OutboxPage() {
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const reload = useCallback(async () => {
-    setEmails(await outboxStore.list());
-  }, []);
-
+  // 訂閱本機寄件匣：背景排程寫入的新信會即時出現，不必重新進頁
   useEffect(() => {
-    void reload();
-  }, [reload]);
+    const subscription = liveQuery(() => outboxStore.list()).subscribe({
+      next: setEmails,
+      error: (err) => setStatus(`讀取寄件匣失敗：${err instanceof Error ? err.message : String(err)}`),
+    });
+    return () => subscription.unsubscribe();
+  }, []);
 
   async function handleCheck() {
     setBusy(true);
     try {
       const summary = await runReminderCheck(new Date());
-      await reload();
       setStatus(
         `已檢查 ${summary.checked} 份合約（${summary.todayKey}）：本次新增 ${summary.sent.length} 封，略過已寄過的 ${summary.skippedDuplicate} 封。`
       );

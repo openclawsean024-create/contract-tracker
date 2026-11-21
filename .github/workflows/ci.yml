@@ -90,11 +90,13 @@ jobs:
             test-results/
           retention-days: 7
 
+  # M1 不部署（GOAL.md Out of scope）。push 到 main 不會觸發；只有 Sean 在 main 上手動執行
+  # workflow_dispatch 時才會跑，且 repo 未啟用 Pages 時會在 Setup Pages 失敗。
   deploy:
-    name: Deploy to pages
+    name: Deploy to pages (manual only)
     runs-on: ubuntu-latest
     needs: [build, e2e]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

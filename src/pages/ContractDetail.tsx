@@ -9,7 +9,8 @@ import {
   MessageSquare,
   GitBranch,
 } from "lucide-react";
-import { getContract, saveContract } from "../lib/storage";
+import { getContract, patchContract, updateContract } from "../lib/storage";
+import { EXTRACTED_TEXT_LIMIT } from "../lib/analyze";
 import type { Contract, ContractCategory } from "../types";
 import { CATEGORY_LABELS, RISK_CATEGORY_LABELS, TEAM_ROLE_LABELS } from "../types";
 import {
@@ -81,27 +82,52 @@ export default function ContractDetailPage() {
       </div>
     );
 
-  /**
-   * 儲存合約。表單欄位（文字、選單、勾選框）採 optimistic：先更新畫面再寫入；
-   * 工作流推進與註解則先寫入本機資料庫，成功後才更新畫面，
-   * 避免畫面顯示已完成但資料其實還沒寫入。
-   */
-  async function persist(
-    updated: Contract,
-    message: string,
-    options: { optimistic?: boolean } = {}
-  ) {
-    if (options.optimistic) setContract(updated);
-    await saveContract(updated);
-    if (!options.optimistic) setContract(updated);
+  const contractId = contract.id;
+
+  function flash(message: string) {
     setSavedMsg(message);
     setTimeout(() => setSavedMsg(""), 2000);
   }
 
+  /**
+   * 所有寫入都以資料庫中「最新」的合約為基礎、只改這次變動的部分（storage.updateContract），
+   * 其他分頁已寫入的工作流、註解或指派不會被這個畫面的舊快照覆蓋。
+   */
+  async function mutate(
+    change: (latest: Contract) => Contract,
+    message: string,
+    options: { optimistic?: boolean } = {}
+  ) {
+    // 勾選框、選單等受控元件先套用到畫面（否則重新渲染會把 DOM 值還原），再以最新資料寫入
+    if (options.optimistic) setContract((cur) => (cur ? change(cur) : cur));
+    try {
+      const saved = await updateContract(contractId, change);
+      setContract(saved);
+      flash(message);
+    } catch (err) {
+      if (options.optimistic) setContract((await getContract(contractId)) ?? null);
+      throw err;
+    }
+  }
+
+  /** 表單欄位：先更新畫面（輸入不卡），再只寫入這個欄位 */
   async function update<K extends keyof Contract>(key: K, value: Contract[K]) {
-    await persist({ ...contract!, [key]: value }, `已更新：${FIELD_LABELS[key] ?? String(key)}`, {
-      optimistic: true,
-    });
+    setContract((cur) => (cur ? { ...cur, [key]: value } : cur));
+    try {
+      const saved = await patchContract(contractId, { [key]: value } as Partial<Contract>);
+      // 以最新資料更新其他欄位，但保留使用者正在輸入的這個欄位，避免游標跳動
+      setContract((cur) => (cur ? { ...saved, [key]: cur[key] } : saved));
+      flash(`已更新：${FIELD_LABELS[key] ?? String(key)}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  /** 狀態已被其他分頁改變時，重新載入並提示 */
+  async function reloadLatest(note: string) {
+    const latest = await getContract(contractId);
+    setContract(latest ?? null);
+    setError(note);
   }
 
   async function run(action: () => Promise<void>) {
@@ -121,6 +147,9 @@ export default function ContractDetailPage() {
   const recipientIds = contract.reminderRecipientIds ?? [];
   const resolvedRecipients = resolveReminderRecipients(contract, members);
   const currentMember = members.find((m) => m.id === currentMemberId);
+  const textTruncated =
+    typeof contract.extractedTextLength === "number" &&
+    contract.extractedTextLength > (contract.extractedText?.length ?? 0);
   const segmentUnit = !contract.source || contract.source === "pdf" ? "頁" : "段";
   const thresholds = reminderThresholds(contract)
     .map((d) => (d === 0 ? "到期當天" : `到期前 ${d} 天`))
@@ -230,15 +259,15 @@ export default function ContractDetailPage() {
                   ? contract.ownerId
                   : ""
               }
-              onChange={(e) =>
+              onChange={(e) => {
+                // 受控元件會在重新渲染時把 DOM 值還原，所以要先同步取出選取值
+                const ownerId = e.target.value || null;
                 void run(() =>
-                  persist(
-                    assignOwner(contract, e.target.value || null, members),
-                    "已更新：負責人",
-                    { optimistic: true }
-                  )
-                )
-              }
+                  mutate((latest) => assignOwner(latest, ownerId, members), "已更新：負責人", {
+                    optimistic: true,
+                  })
+                );
+              }}
             >
               <option value="">{UNASSIGNED_LABEL}</option>
               {members.map((m) => (
@@ -268,17 +297,19 @@ export default function ContractDetailPage() {
                     type="checkbox"
                     checked={recipientIds.includes(m.id)}
                     onChange={(e) =>
-                      void run(() => persist(
-                        setReminderRecipients(
-                          contract,
-                          e.target.checked
-                            ? [...recipientIds, m.id]
-                            : recipientIds.filter((r) => r !== m.id),
-                          members
-                        ),
-                        "已更新：提醒收件人",
-                        { optimistic: true }
-                      ))
+                      void run(() => {
+                        const checked = e.target.checked;
+                        return mutate((latest) => {
+                          const current = latest.reminderRecipientIds ?? [];
+                          return setReminderRecipients(
+                            latest,
+                            checked
+                              ? [...current, m.id]
+                              : current.filter((r) => r !== m.id),
+                            members
+                          );
+                        }, "已更新：提醒收件人", { optimistic: true });
+                      })
                     }
                   />
                   {m.name}
@@ -343,12 +374,18 @@ export default function ContractDetailPage() {
           <button
             data-testid="advance-status"
             onClick={() =>
-              void run(() =>
-                persist(
-                  advanceWorkflow(contract),
+              void run(async () => {
+                // 以畫面上看到的「下一階段」為目標；若其他分頁已推進，advanceWorkflow 會拒絕，改為重新載入
+                const latest = await getContract(contractId);
+                if (!latest || getWorkflowStatus(latest) !== status) {
+                  await reloadLatest("審核狀態已在其他分頁變更，已重新載入，請確認後再操作。");
+                  return;
+                }
+                await mutate(
+                  (fresh) => advanceWorkflow(fresh, next),
                   `已推進到「${WORKFLOW_LABELS[next]}」`
-                )
-              )
+                );
+              })
             }
             className="mt-3 px-4 py-2 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700"
           >
@@ -523,15 +560,13 @@ export default function ContractDetailPage() {
             data-testid="add-note"
             onClick={() =>
               void run(async () => {
-                await persist(
-                  addNote(contract, {
-                    id: uuid(),
-                    text: noteDraft,
-                    author: currentMember?.name ?? "",
-                    now: new Date(),
-                  }),
-                  "已新增註解"
-                );
+                const note = {
+                  id: uuid(),
+                  text: noteDraft,
+                  author: currentMember?.name ?? "",
+                  now: new Date(),
+                };
+                await mutate((latest) => addNote(latest, note), "已新增註解");
                 setNoteDraft("");
               })
             }
@@ -550,8 +585,16 @@ export default function ContractDetailPage() {
       {contract.extractedText && (
         <details className="bg-white rounded-xl border border-slate-200 p-5">
           <summary className="font-semibold cursor-pointer">
-            完整擷取文字（顯示 / 隱藏）
+            {textTruncated
+              ? `擷取文字（只保存前 ${EXTRACTED_TEXT_LIMIT.toLocaleString()} 字，原文共 ${contract.extractedTextLength!.toLocaleString()} 字）`
+              : "完整擷取文字"}
+            （顯示 / 隱藏）
           </summary>
+          {textTruncated && (
+            <p className="mt-2 text-xs text-amber-700" data-testid="text-truncated-note">
+              規則比對已使用完整原文；本機只保存前 {EXTRACTED_TEXT_LIMIT.toLocaleString()} 字，超出部分不會出現在這裡或全文搜尋中。
+            </p>
+          )}
           <pre
             data-testid="extracted-text"
             className="mt-3 text-xs whitespace-pre-wrap max-h-96 overflow-y-auto text-slate-700 bg-slate-50 p-3 rounded"

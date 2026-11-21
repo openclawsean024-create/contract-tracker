@@ -4,6 +4,9 @@ import type { Contract, OutboxEmail, TeamMember } from "../types";
 import { DISCLAIMER_TEXT } from "./disclaimer";
 import { ownerLabel, resolveReminderRecipients } from "./team";
 import type { ContractDB } from "./storage";
+import { daysUntil, toDateKey } from "./dates";
+
+export { daysUntil, toDateKey };
 
 /** 不論使用者設定為何，固定會在到期前 7 天與到期當天各提醒一次。 */
 export const FIXED_REMINDER_THRESHOLDS: readonly number[] = [7, 0];
@@ -106,27 +109,6 @@ export class MockEmailAdapter implements EmailAdapter {
     });
     return { accepted };
   }
-}
-
-const pad = (n: number) => String(n).padStart(2, "0");
-
-/** 以本地時區取得 YYYY-MM-DD */
-export function toDateKey(date: Date): string {
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-}
-
-function parseDateKey(key: string): number | null {
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(key ?? "");
-  if (!m) return null;
-  return Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
-}
-
-/** 距離到期還有幾天（當天＝0、已過期為負數）；日期格式錯誤時回傳 null。 */
-export function daysUntil(expiresAt: string, todayKey: string): number | null {
-  const exp = parseDateKey(expiresAt);
-  const today = parseDateKey(todayKey);
-  if (exp === null || today === null) return null;
-  return Math.round((exp - today) / 86_400_000);
 }
 
 /** 這份合約的所有提醒門檻：使用者設定的天數＋固定的 7 天與當天（去重、由大到小）。 */
