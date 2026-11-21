@@ -107,3 +107,14 @@ describe("AC-003 混合條款時以明確的契約名稱為準（Codex 審查 #6
     expect(detectContractType("保密協議\n附件：勞動契約範本")).toBe("NDA");
   });
 });
+
+describe("AC-003 明確名稱的邊界情況（Claude 子代理複審）", () => {
+  it("AC-003 「顧問服務合約」判為顧問，不被「服務合約」蓋過", () => {
+    expect(detectContractType("顧問服務合約\n甲方委任乙方提供顧問諮詢")).toBe("顧問");
+  });
+
+  it("AC-003 英文 nda 必須是完整單字（Standard 不算）", () => {
+    expect(detectContractType("Standard Terms：月租金 1,000 元，押金 2 個月")).toBe("租賃");
+    expect(detectContractType("This NDA applies to the parties")).toBe("NDA");
+  });
+});

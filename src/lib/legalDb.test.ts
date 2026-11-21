@@ -195,7 +195,13 @@ describe("evaluateRisk — contract-level score aggregation", () => {
 // ---------------------------------------------------------------------------
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { hasAffirmativeAutoRenewal, pickArticle, splitSentences } from "./legalDb";
+import {
+  findAffirmativeAutoRenewal,
+  findUnilateralRight,
+  hasAffirmativeAutoRenewal,
+  pickArticle,
+  splitSentences,
+} from "./legalDb";
 import { extractClauses } from "./pdfParser";
 import { textToPages } from "./textExtract";
 import { RISK_CATEGORY_LABELS, type LegalDB } from "../types";
@@ -446,12 +452,24 @@ describe("AC-004 全文規則只在同一句內比對", () => {
     expect(firedRuleIds(text)).toContain("r5");
   });
 
-  it("AC-004 splitSentences 依句號、分號與換行切句並保留位置", () => {
-    expect(splitSentences("甲。乙；丙\n丁").map((s) => [s.text, s.offset])).toEqual([
+  it("AC-004 splitSentences 依句號、分號、空行與新條次切句，並保留位置", () => {
+    expect(splitSentences("甲。乙；丙\n\n丁").map((s) => [s.text, s.offset])).toEqual([
       ["甲", 0],
       ["乙", 2],
       ["丙", 4],
-      ["丁", 6],
+      ["丁", 7],
+    ]);
+    expect(splitSentences("第一條 甲\n第二條 乙\n（一）丙\n[Page 2]\n丁").map((s) => s.text.trim())).toEqual([
+      "第一條 甲",
+      "第二條 乙",
+      "（一）丙",
+      "[Page 2]\n丁",
+    ]);
+  });
+
+  it("AC-004 splitSentences：貼上文字的硬換行不切句", () => {
+    expect(splitSentences("乙方違約應給付相當於總價三倍\n之違約金。").map((s) => s.text)).toEqual([
+      "乙方違約應給付相當於總價三倍\n之違約金",
     ]);
   });
 });
@@ -498,5 +516,80 @@ describe("AC-004 否定句與尚未約定", () => {
       expect(rule.title).toMatch(/^提及/);
       expect(rule.title).not.toContain("已約定");
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Claude 子代理複審（2026-11-22）：上一輪修正帶進的退化
+// ---------------------------------------------------------------------------
+describe("AC-004 否定語只排除被否定的那一次命中", () => {
+  it("AC-004 r3：同句有否定與肯定時仍命中", () => {
+    expect(firedRuleIds("附約不自動續約，但主約自動續約一年。")).toContain("r3");
+    expect(firedRuleIds("本合約期滿自動續約一年，但乙方不得自動延長服務範圍。")).toContain("r3");
+  });
+
+  it("AC-004 r3：「不因……而自動續約」視為否定", () => {
+    expect(firedRuleIds("本合約不因期滿而自動續約。")).not.toContain("r3");
+    expect(findAffirmativeAutoRenewal("本合約不因期滿而自動續約")).toBeNull();
+  });
+
+  it("AC-004 r3：「無須通知即自動續約」仍是自動續約", () => {
+    expect(firedRuleIds("期滿前無須通知即自動續約一年。")).toContain("r3");
+  });
+
+  it("AC-004 r1：同句有「不得單方」時，另一處的單方權利仍命中", () => {
+    expect(firedRuleIds("本公司得單方調整價格，乙方不得單方終止本合約。")).toContain("r1");
+    expect(firedRuleIds("任一方不得單方變更，亦不可單方終止本合約。")).not.toContain("r1");
+    expect(findUnilateralRight("甲方不得單方變更")).toBeNull();
+  });
+});
+
+describe("AC-004 r2 倍數違約金的各種寫法", () => {
+  it.each([
+    "乙方違約時應給付違約金，金額為契約總價之三倍。",
+    "違約金按日計算，最高為總價三倍。",
+    "乙方違約應給付相當於總價三倍\n之違約金。",
+    "違約金為報酬之 3 倍。",
+    "違約金以價金之10倍計算。",
+  ])("AC-004 命中：%s", (text) => {
+    expect(firedRuleIds(text)).toContain("r2");
+  });
+
+  it.each([
+    "違約金上限一千元，並提供一倍數量之備品。",
+    "違約金上限為新台幣一千元。\n交貨時乙方應提供一倍數量之備品。",
+    "乙方應於三倍工時內完成，違約金另議。",
+  ])("AC-004 不命中：%s", (text) => {
+    expect(firedRuleIds(text)).not.toContain("r2");
+  });
+});
+
+describe("AC-004 r7 期限必須和保密相鄰", () => {
+  it.each([
+    "本合約自2026年1月1日起生效，乙方應對甲方資料負保密義務。",
+    "合作期間乙方應負保密義務。",
+  ])("AC-004 命中（未約定保密期限）：%s", (text) => {
+    expect(firedRuleIds(text)).toContain("r7");
+  });
+
+  it.each([
+    "乙方應保密二年。",
+    "乙方之保密期間為 3 年。",
+    "乙方應負保密義務，期限為二年。",
+    "乙方應於離職後 24 個月內保密。",
+    "保密義務於本合約終止後持續。",
+  ])("AC-004 不命中（已約定期限）：%s", (text) => {
+    expect(firedRuleIds(text)).not.toContain("r7");
+  });
+});
+
+describe("AC-004 r8／r9 的「尚未約定」必須靠近關鍵字", () => {
+  it("AC-004 句中其他地方的「未規定」不會遮掉管轄提示", () => {
+    const result = evalText("本合約未規定事項依民法，雙方同意以臺北地院為管轄法院。");
+    expect(result.infos.map((i) => i.ruleId)).toEqual(["r8"]);
+  });
+
+  it("AC-004 「管轄法院另行協議」不顯示提示", () => {
+    expect(evalText("雙方之管轄法院另行協議。").infos).toEqual([]);
   });
 });

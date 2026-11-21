@@ -23,18 +23,18 @@
 | AC-007 團隊共用（本機 mock） | ✅ | `4596a52`、`8c8df5e` | `src/lib/team.test.ts`（15）、`tests/e2e/workflow-team.spec.ts`（1） | `npx vitest run src/lib/team.test.ts` | exit 0，15／15 |
 | AC-008 免責聲明與文案 | ✅（文案待 Sean 定稿） | `4596a52`、`8c8df5e` | `src/lib/disclaimer.test.ts`（9）、`reminderDispatch.test.ts`（2）、主流程 E2E、`AC-008 免責確認狀態…` E2E | `git grep -nE "AI ?(摘要\|解釋\|分析\|審核)\|法律意見書" src/` | grep 無結果（exit 1）；E2E 在首頁、合約列表、合約詳情三頁斷言聲明可見，未勾選時上傳與分析按鈕皆 disabled |
 | AC-009 E2E 與品質閘門 | ✅ | `03e2dc0`、`04850bd`、`e6aee3e` | `src/ci.test.ts`（4）、`tests/e2e/*.spec.ts`（17） | `npm run lint`、`npm test`、`npm run build`、`npm run e2e`；`grep -n "\|\| echo\\\|continue-on-error" .github/workflows/ci.yml` | 四個指令皆 exit 0；grep 無結果（exit 1） |
-| AC-010 資料與憑證衛生 | ✅ | `04850bd` | `src/hygiene.test.ts`（6）、所有 E2E 的網路攔截 fixture | `git grep -nIE "(sk-[A-Za-z0-9]{20}\|ghp_[A-Za-z0-9]{20}\|AKIA[0-9A-Z]{16}\|BEGIN [A-Z ]*PRIVATE KEY)"`；`git grep -nE "@[A-Za-z0-9.-]+\.[a-z]{2,}" -- src tests` | 第一個 grep 無結果（exit 1）；第二個 grep 的 40 筆全部是 `example.com`／`example.test`；E2E 攔截到的請求全部是 `http://127.0.0.1:4173` |
+| AC-010 資料與憑證衛生 | ✅ | `04850bd` | `src/hygiene.test.ts`（6）、所有 E2E 的網路攔截 fixture | `git grep -nIE "(sk-[A-Za-z0-9]{20}\|ghp_[A-Za-z0-9]{20}\|AKIA[0-9A-Z]{16}\|BEGIN [A-Z ]*PRIVATE KEY)"`；`git grep -nE "@[A-Za-z0-9.-]+\.[a-z]{2,}" -- src tests` | 第一個 grep 無結果（exit 1）；第二個 grep 的 45 筆全部是 `example.com`／`example.test`；E2E 攔截到的請求全部是 `http://127.0.0.1:4173` |
 
-## 品質閘門輸出摘要（2026-11-22，Codex 審查修正後，全新 `npm ci` 後執行）
+## 品質閘門輸出摘要（2026-11-22，Codex 與 Claude 子代理審查修正後，全新 `npm ci` 後執行）
 
 | 指令 | Exit | 輸出摘要 |
 |---|---:|---|
 | `npm ci --legacy-peer-deps` | 0 | — |
 | `npm run lint`（`tsc --noEmit && tsc --noEmit -p tsconfig.e2e.json`） | 0 | 無錯誤 |
 | `npm run typecheck`（同 lint） | 0 | 無錯誤 |
-| `npm test`（`vitest --run`） | 0 | 17 個檔案、232 個測試全部通過（原有 33 個仍在其中，斷言未刪改） |
+| `npm test`（`vitest --run`） | 0 | 18 個檔案、265 個測試全部通過（原有 33 個仍在其中，斷言未刪改） |
 | `npm run build`（`tsc -b && vite build`） | 0 | 2439 modules；`index-*.js` 600 kB、`pdfjs-*.js` 359 kB、`mammoth.browser-*.js` 305 kB（lazy）、`react-*.js` 164 kB；有 chunk 大於 500 kB 的警告（非錯誤） |
-| `npm run e2e`（build + Playwright，本機 `vite preview`） | 0 | 17 passed（約 14 秒） |
+| `npm run e2e`（build + Playwright，本機 `vite preview`） | 0 | 17 passed（約 13 秒，連跑兩次） |
 | `git diff --check` | 0 | — |
 
 另外以 headless Chromium 實際開啟 build 產物走過一次完整流程（儀表板 → 團隊 → 貼上合約 → 詳情 → 模擬寄件匣；桌機與 390px 寬度），console 無錯誤。
@@ -86,6 +86,37 @@
 - #8 把我原本寫的「子網域視為有效」斷言改成「無效」：這是依 GOAL AC-007 收緊行為，不是放寬；原有 33 個測試未動。
 - #4 的文案改動讓 E2E 斷言的字串從「已約定管轄或仲裁」改為「提及管轄或仲裁」，檢查強度不變。
 - 修正過程中另外修了一個問題：負責人選單與收件人勾選框是受控元件，非同步寫入期間 React 會把畫面值還原，現在先套用到畫面再寫入。
+
+## Claude 子代理複審（2026-11-22，審 `cf0cc6d`）
+
+Codex 所有帳號額度低於 20%，複審改由 Claude 子代理執行（只拿到程式碼與規格，沒有拿到修正者的判斷）。它找到上一輪修正帶進的 9 項問題，逐項重現後全部屬實，已修正並補回歸測試：
+
+| # | 嚴重度 | 問題 | 修正 | 回歸測試 |
+|---|---|---|---|---|
+| 1 | 中 | r3：同句有一處否定就整句不報（「附約不自動續約，但主約自動續約一年」） | r3 改為逐次判斷否定（`findAffirmativeAutoRenewal`）；另支援「不因……而自動續約」 | `legalDb.test.ts`（3） |
+| 2 | 中 | r1：同句有「不得單方」就遮掉霸王條款 | r1 改為逐次判斷（`findUnilateralRight`） | `legalDb.test.ts`（1） |
+| 3 | 中 | r2：倍數與違約金之間有逗號或硬換行就漏報；不支援阿拉伯數字倍數 | 單一換行不再切句（只在空行與新條次切）；跨逗號時要求倍數接在金額基準後；支援 `3 倍`、`10倍` | `legalDb.test.ts`（9） |
+| 4 | 中 | r7：生效日期的年份或「合作期間」讓保密條款漏報 | 期限必須和「保密」相鄰，排除 4 位數年份 | `legalDb.test.ts`（7） |
+| 5 | 中 | 到期日清空的合約匯出後無法匯入 | 匯入驗證接受空字串到期日 | `storage.test.ts`（1） |
+| 6 | 中 | 本機已有同 Email、不同 ID 的成員時，匯入清空指派 | 以 Email 對應成員並改寫負責人／收件人；匯入結果回報被清除的指派數 | `storage.test.ts`（3） |
+| 7 | 中 | 「顧問服務合約」被判為服務；`nda` 子字串誤中 | 顧問名稱允許「顧問服務合約」；`nda` 改為完整單字 | `contractType.test.ts`（2） |
+| 8 | 低 | 搜尋完整詞確認比查詢前更嚴（「NDA保密」「甲方/乙方」查不到） | 查詢拆詞改用與編碼器相同的邊界 | `search.test.ts`（2） |
+| 9 | 低 | `cf0cc6d` 的 commit 訊息寫「原有 33 個測試未改動」，但同一個 commit 也改了 3 處我先前新增的斷言 | 見下方「需 Sean 確認」；已推上的 commit 不改寫（不 force push） | — |
+
+測試強度：子代理指出「解析途中取消勾選」的測試沒有覆蓋合約頁實際讀取勾選狀態的方式。已把讀取函式抽成 `store.currentAckReader`，新增 `src/store.test.ts`（3），驗證它反映最新狀態，並檢查合約頁的寫入與匯入都使用它。
+
+也一併處理了它列出的未驗證疑點：
+- 欄位寫入失敗時，畫面回到資料庫的實際值。
+- r8／r9 的「尚未約定」必須靠近關鍵字，句中其他地方出現「未規定」不再誤殺（`legalDb.test.ts`（2））。
+- 子代理認為 PDF 跨頁句子會被切斷：改為只在空行、新條次與 `[Page N]` 處切句。
+
+### 需 Sean 確認：行為改變而修改的斷言（AGENTS.md §4-3）
+
+以下都是我在本 PR 中新增的測試，不屬於原有 33 個；改動都是收緊或等強度：
+1. `team.test.ts`：`team.example.com` 原本被視為有效 Email，改為無效（依 GOAL AC-007 只接受兩個網域）。
+2. E2E 主流程：「已約定管轄或仲裁」改為「提及管轄或仲裁」（r8 文案改變）。
+3. E2E 主流程：寄件匣收件人從「包含負責人 Email」改為「只有指定收件人」（更嚴格）。
+4. `legalDb.test.ts` 的切句測試：「丙\n丁」原本切成兩句，現在視為同一句（硬換行不切句）；另新增空行、新條次、`[Page N]` 的切句案例。
 
 ## 發現但未處理（不在 M1 AC 範圍）
 

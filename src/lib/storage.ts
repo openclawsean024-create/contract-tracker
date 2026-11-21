@@ -153,7 +153,8 @@ export function isValidBackupContract(c: unknown): c is Contract {
     typeof x.counterparty === "string" &&
     typeof x.category === "string" &&
     typeof x.expiresAt === "string" &&
-    isValidDateKey(x.expiresAt) &&
+    // 詳情頁可以把到期日清空（存成 ""），這種合約也要能備份還原
+    (x.expiresAt === "" || isValidDateKey(x.expiresAt)) &&
     typeof x.riskScore === "string" &&
     RISK_LEVELS.has(x.riskScore) &&
     Array.isArray(x.riskAnalysis) &&
@@ -191,6 +192,8 @@ export interface ImportResult {
   /** 本機已有同 ID 或同 Email 的成員 */
   membersSkipped: number;
   membersInvalid: number;
+  /** 指向備份與本機都不存在的成員、因此改為未指派的負責人／收件人數 */
+  assignmentsCleared: number;
 }
 
 /**
@@ -220,25 +223,36 @@ export async function importAll(
     membersAdded: 0,
     membersSkipped: 0,
     membersInvalid: 0,
+    assignmentsCleared: 0,
   };
 
   await database.transaction("rw", database.contracts, database.teamMembers, async () => {
     const existingMembers = await database.teamMembers.toArray();
-    const memberIds = new Set(existingMembers.map((m) => m.id));
-    const memberEmails = new Set(existingMembers.map((m) => m.email.toLowerCase()));
+    const localIds = new Set(existingMembers.map((m) => m.id));
+    const localIdByEmail = new Map(existingMembers.map((m) => [m.email.toLowerCase(), m.id]));
+    /** 備份中的成員 ID → 本機成員 ID（同 Email 的成員視為同一人） */
+    const idMap = new Map<string, string>(existingMembers.map((m) => [m.id, m.id]));
     for (const m of rawMembers) {
       if (!isValidBackupMember(m)) {
         result.membersInvalid++;
         continue;
       }
       const email = m.email.trim().toLowerCase();
-      if (memberIds.has(m.id) || memberEmails.has(email)) {
+      const sameEmail = localIdByEmail.get(email);
+      if (sameEmail) {
+        idMap.set(m.id, sameEmail);
+        result.membersSkipped++;
+        continue;
+      }
+      if (localIds.has(m.id)) {
+        // ID 相同但 Email 不同：視為不同的人，不把指派對應到本機那位
         result.membersSkipped++;
         continue;
       }
       await database.teamMembers.add({ ...m, email, name: m.name.trim() });
-      memberIds.add(m.id);
-      memberEmails.add(email);
+      localIds.add(m.id);
+      localIdByEmail.set(email, m.id);
+      idMap.set(m.id, m.id);
       result.membersAdded++;
     }
 
@@ -252,16 +266,19 @@ export async function importAll(
         continue;
       }
       const withDefaults = withContractDefaults(c);
-      await database.contracts.add({
-        ...withDefaults,
-        ownerId:
-          withDefaults.ownerId && memberIds.has(withDefaults.ownerId)
-            ? withDefaults.ownerId
-            : null,
-        reminderRecipientIds: (withDefaults.reminderRecipientIds ?? []).filter((id) =>
-          memberIds.has(id)
+      const ownerId = withDefaults.ownerId ? idMap.get(withDefaults.ownerId) ?? null : null;
+      const recipients = [
+        ...new Set(
+          (withDefaults.reminderRecipientIds ?? [])
+            .map((id) => idMap.get(id))
+            .filter((id): id is string => typeof id === "string")
         ),
-      });
+      ];
+      const cleared =
+        (withDefaults.ownerId && !ownerId ? 1 : 0) +
+        (withDefaults.reminderRecipientIds ?? []).filter((id) => !idMap.has(id)).length;
+      result.assignmentsCleared += cleared;
+      await database.contracts.add({ ...withDefaults, ownerId, reminderRecipientIds: recipients });
       result.contractsAdded++;
     }
   });

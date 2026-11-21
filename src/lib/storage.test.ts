@@ -196,3 +196,56 @@ describe("AC-005 備份匯入不覆蓋本機資料", () => {
     expect(await database.contracts.count()).toBe(0);
   });
 });
+
+describe("AC-007 匯入時以 Email 對應成員（Claude 子代理複審）", () => {
+  it("AC-007 本機已有同 Email、不同 ID 的成員時，指派改指向本機成員", async () => {
+    await database.teamMembers.add(makeTestMember({ id: "m-new", email: "a@example.com" }));
+    const backup = JSON.stringify({
+      app: "contract-tracker",
+      version: "2",
+      contracts: [makeTestContract({ id: "c1", ownerId: "m-old", reminderRecipientIds: ["m-old"] })],
+      teamMembers: [makeTestMember({ id: "m-old", email: "A@example.com" })],
+    });
+    const result = await importAll(backup, database);
+    expect(result).toMatchObject({ membersSkipped: 1, membersAdded: 0, assignmentsCleared: 0 });
+    expect(await get("c1")).toMatchObject({ ownerId: "m-new", reminderRecipientIds: ["m-new"] });
+    expect(await database.teamMembers.count()).toBe(1);
+  });
+
+  it("AC-007 ID 相同但 Email 不同時不匯入備份的成員，本機成員保持不變", async () => {
+    await database.teamMembers.add(makeTestMember({ id: "m1", email: "local@example.com" }));
+    const backup = JSON.stringify({
+      app: "contract-tracker",
+      version: "2",
+      contracts: [makeTestContract({ id: "c1", ownerId: "m1" })],
+      teamMembers: [makeTestMember({ id: "m1", email: "other@example.com" })],
+    });
+    const result = await importAll(backup, database);
+    expect(result.membersSkipped).toBe(1);
+    expect((await database.teamMembers.get("m1"))!.email).toBe("local@example.com");
+  });
+
+  it("AC-007 匯入結果回報被清除的指派數", async () => {
+    const backup = JSON.stringify({
+      app: "contract-tracker",
+      version: "2",
+      contracts: [makeTestContract({ id: "c1", ownerId: "ghost", reminderRecipientIds: ["ghost", "ghost2"] })],
+      teamMembers: [],
+    });
+    expect((await importAll(backup, database)).assignmentsCleared).toBe(3);
+  });
+});
+
+describe("AC-005 到期日為空的合約也能備份還原（Claude 子代理複審）", () => {
+  it("AC-005 expiresAt 為空字串時，匯出再匯入不會遺失", async () => {
+    await database.contracts.put(withContractDefaults(makeTestContract({ id: "no-date", expiresAt: "" })));
+    const backup = JSON.stringify(await buildBackup(database, now));
+    const fresh = new ContractDB(`storage-test-nodate-${seq}`);
+    try {
+      expect(await importAll(backup, fresh)).toMatchObject({ contractsAdded: 1, contractsInvalid: 0 });
+      expect((await fresh.contracts.get("no-date"))!.expiresAt).toBe("");
+    } finally {
+      await fresh.delete();
+    }
+  });
+});

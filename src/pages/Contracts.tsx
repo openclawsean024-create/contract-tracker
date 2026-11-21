@@ -12,7 +12,7 @@ import {
 import { analyzeContract } from "../lib/analyze";
 import { deleteContract, exportAll } from "../lib/storage";
 import { commitAnalyzedContract, importBackup } from "../lib/contractIntake";
-import { useAppStore } from "../store";
+import { currentAckReader, useAppStore } from "../store";
 import { invalidateIndex, ensureIndex } from "../lib/search";
 import { DISCLAIMER_ACK_LABEL, canUpload } from "../lib/disclaimer";
 import { WORKFLOW_LABELS, getWorkflowStatus } from "../lib/workflow";
@@ -72,7 +72,7 @@ export default function ContractsPage() {
       pdfHash: fileHash,
     });
     // 解析期間使用者可能已取消勾選：以「當下」的狀態為準
-    await commitAnalyzedContract(contract, () => useAppStore.getState().disclaimerAck);
+    await commitAnalyzedContract(contract, currentAckReader);
     invalidateIndex();
     await ensureIndex();
     await refresh();
@@ -142,7 +142,7 @@ export default function ContractsPage() {
     setError(null);
     try {
       const text = await file.text();
-      const r = await importBackup(text, () => useAppStore.getState().disclaimerAck);
+      const r = await importBackup(text, currentAckReader);
       invalidateIndex();
       await refresh();
       await refreshMembers();
@@ -150,6 +150,9 @@ export default function ContractsPage() {
         `已匯入 ${r.contractsAdded} 份合約、${r.membersAdded} 位成員` +
           (r.contractsSkipped + r.membersSkipped > 0
             ? `；本機已有的 ${r.contractsSkipped} 份合約、${r.membersSkipped} 位成員保留本機版本，未覆蓋`
+            : "") +
+          (r.assignmentsCleared > 0
+            ? `；${r.assignmentsCleared} 個負責人／收件人在本機找不到對應成員，已改為未指派`
             : "") +
           (r.contractsInvalid + r.membersInvalid > 0
             ? `；${r.contractsInvalid + r.membersInvalid} 筆資料格式不正確，已略過`

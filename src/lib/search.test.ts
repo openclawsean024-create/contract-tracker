@@ -175,3 +175,22 @@ describe("FR-019 完整詞確認（Codex 審查 #11）", () => {
     expect(await ids("續約")).toContain("scattered");
   });
 });
+
+describe("FR-019 查詢拆詞與編碼器一致（Claude 子代理複審）", () => {
+  beforeEach(async () => {
+    await saveContract(
+      makeTestContract({ id: "nda", title: "NDA 保密協議", extractedText: "【測試】甲方與乙方約定保密。" })
+    );
+  });
+
+  it("FR-019 中英文相連、斜線、連字號都能搜尋", async () => {
+    expect(await ids("NDA保密")).toEqual(["nda"]);
+    expect(await ids("nda-保密")).toEqual(["nda"]);
+    expect(await ids("甲方/乙方")).toEqual(["nda"]);
+  });
+
+  it("FR-019 queryPhrases 以中文段與英數段拆詞", async () => {
+    const { queryPhrases } = await import("./search");
+    expect(queryPhrases("NDA保密 / 甲方-乙方")).toEqual(["保密", "甲方", "乙方", "nda"]);
+  });
+});

@@ -18,7 +18,7 @@ npx playwright install chromium   # 第一次跑 E2E 前需要（CI 用 --with-d
 | 安裝 | `npm ci --legacy-peer-deps` | 可用 | exit 0 |
 | Lint／型別檢查 | `npm run lint`（`tsc --noEmit && tsc --noEmit -p tsconfig.e2e.json`） | 可用 | exit 0 |
 | Typecheck | `npm run typecheck`（與 lint 相同） | 可用 | exit 0 |
-| 單元測試 | `npm test`（`vitest --run`，只收 `src/**/*.test.ts(x)`） | 可用 | exit 0；17 個檔案、232 個測試通過 |
+| 單元測試 | `npm test`（`vitest --run`，只收 `src/**/*.test.ts(x)`） | 可用 | exit 0；18 個檔案、265 個測試通過 |
 | 單一測試檔 | `npx vitest run src/lib/<name>.test.ts` | 可用 | — |
 | 監看測試 | `npm run test:watch` | 可用 | 未執行（互動式） |
 | Build | `npm run build`（`tsc -b && vite build`） | 可用 | exit 0；`dist/index.html` 含 `#root`，`dist/assets/` 有 React app bundle |

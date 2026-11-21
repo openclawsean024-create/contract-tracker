@@ -41,7 +41,7 @@ const EXPLICIT_TYPE_NAMES: ReadonlyArray<[RegExp, DetectedContractType]> = [
   [/(?:採購|買賣|供貨|供應)(?:契約|合約)/, "採購"],
   [/(?:租賃|房屋租賃)(?:契約|合約)|租約/, "租賃"],
   [/授權(?:契約|合約|書)/, "授權"],
-  [/顧問(?:契約|合約)/, "顧問"],
+  [/顧問(?:服務)?(?:契約|合約)/, "顧問"],
   [/(?:服務|委任|承攬)(?:契約|合約)/, "服務"],
   [/合作備忘錄|合作意向書|\bmou\b/, "合作 MOU"],
 ];
@@ -60,7 +60,7 @@ export function detectContractType(content: string): DetectedContractType {
   // 第二輪：一般關鍵字（沿用 contract-reviewer 的規則），
   // 「保密」是許多合約都有的一般條款，所以排在其他類型線索之後
   const has = (...keywords: string[]) => keywords.some((k) => lower.includes(k));
-  if (has("nda")) return "NDA";
+  if (/\bnda\b/.test(lower)) return "NDA";
   if (has("勞動契約", "僱用", "月薪", "離職")) return "僱傭";
   if (has("採購", "貨款", "交貨")) return "採購";
   if (has("租賃", "租金", "押金", "出租人")) return "租賃";

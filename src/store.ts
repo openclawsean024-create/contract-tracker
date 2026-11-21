@@ -36,6 +36,9 @@ interface AppState {
   bootstrap: () => Promise<void>;
 }
 
+/** 讀取「當下」的免責勾選狀態（不是元件渲染時的快照），新增合約的所有入口都用它 */
+export const currentAckReader = (): boolean => useAppStore.getState().disclaimerAck;
+
 export const useAppStore = create<AppState>((set, get) => ({
   contracts: [],
   legalDb: null,

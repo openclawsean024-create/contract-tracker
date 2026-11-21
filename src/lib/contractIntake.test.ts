@@ -45,6 +45,7 @@ describe("AC-008 新增合約前一律確認免責勾選", () => {
       membersAdded: 0,
       membersSkipped: 0,
       membersInvalid: 0,
+      assignmentsCleared: 0,
     }));
     await expect(importBackup("{}", () => false, importer)).rejects.toBeInstanceOf(
       DisclaimerNotAcknowledgedError

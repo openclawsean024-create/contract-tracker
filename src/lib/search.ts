@@ -97,12 +97,13 @@ const SEARCH_LIMIT = 100;
  * 因此剛改過標題或剛刪除的合約不會出現過期的結果（本機資料量小，重建成本可忽略）。
  * 同一份合約只回傳一次，field 為第一個命中的欄位（標題 → 內文 → 對方）。
  */
-/** 查詢拆成「詞」（以空白或標點分隔），每個詞都要以連續字串出現在命中的欄位中 */
-function queryPhrases(query: string): string[] {
-  return query
-    .toLowerCase()
-    .split(/[\s，。、；：！？,.;:!?()（）「」『』"']+/)
-    .filter((p) => encodeForSearch(p).length > 0);
+/**
+ * 查詢拆成「詞」，邊界和編碼器一致：連續的中文為一個詞、連續的英數為一個詞
+ * （「NDA保密」→ nda、保密；「甲方/乙方」→ 甲方、乙方）。每個詞都要以連續字串出現在命中的欄位中。
+ */
+export function queryPhrases(query: string): string[] {
+  const lower = (query ?? "").toLowerCase();
+  return [...(lower.match(CJK_RUN) ?? []), ...(lower.match(LATIN_WORD) ?? [])];
 }
 
 export async function searchContracts(

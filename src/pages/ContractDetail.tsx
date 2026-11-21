@@ -120,6 +120,8 @@ export default function ContractDetailPage() {
       flash(`已更新：${FIELD_LABELS[key] ?? String(key)}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+      // 寫入失敗（例如合約已在其他分頁刪除）時，畫面回到資料庫的實際狀態
+      setContract((await getContract(contractId)) ?? null);
     }
   }
 
